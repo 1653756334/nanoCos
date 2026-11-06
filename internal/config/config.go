@@ -1,14 +1,69 @@
 package config
 
 import (
+	"bufio"
 	"crypto/rand"
 	"encoding/hex"
 	"flag"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 )
+
+// AutoLoadDotEnv 尝试在当前工作目录下寻找并加载 .env 文件；若文件不存在则静默跳过
+func AutoLoadDotEnv() {
+	_ = LoadDotEnv(".env")
+}
+
+// LoadDotEnv 从指定路径解析 dotenv 格式文件并注入环境变量（系统原有环境变量优先级更高，不被覆盖）
+func LoadDotEnv(filename string) error {
+	f, err := os.Open(filename)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer f.Close()
+
+	return ParseEnvReader(f)
+}
+
+// ParseEnvReader 解析任意 io.Reader 中的 KEY=VALUE 格式并注入当前进程环境变量
+func ParseEnvReader(r io.Reader) error {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "export ") {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+		}
+		key, val, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		val = strings.TrimSpace(val)
+		if len(val) >= 2 {
+			if (strings.HasPrefix(val, "\"") && strings.HasSuffix(val, "\"")) ||
+				(strings.HasPrefix(val, "'") && strings.HasSuffix(val, "'")) {
+				val = val[1 : len(val)-1]
+			}
+		}
+		// 仅在当前进程尚未显式定义该变量时注入，保证外部系统环境变量优先级更高
+		if _, exists := os.LookupEnv(key); !exists {
+			_ = os.Setenv(key, val)
+		}
+	}
+	return scanner.Err()
+}
 
 // Config 保存 NanoCOS 服务的运行配置
 type Config struct {
@@ -29,8 +84,10 @@ type Config struct {
 	LogFormat     string `json:"logFormat"`
 }
 
-// Load 解析命令行参数与环境变量（命令行参数优先于环境变量，环境变量优先于默认值）
+// Load 解析命令行参数与环境变量（命令行参数优先于环境变量，环境变量优先于 .env，.env 优先于默认值）
 func Load() *Config {
+	AutoLoadDotEnv()
+
 	cfg := &Config{}
 
 	defaultAddr := getEnv("NANOCOS_ADDR", ":9000")
