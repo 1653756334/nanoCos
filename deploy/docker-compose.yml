@@ -8,20 +8,25 @@ services:
     container_name: nanocos
     restart: unless-stopped
     ports:
-      - "9000:9000"
+      # 宿主机对外映射端口，可通过 deploy/.env 中的 NANOCOS_PORT 自定义，默认 9000
+      - "${NANOCOS_PORT:-9000}:9000"
+    env_file:
+      - path: .env
+        required: false
     environment:
+      # 容器内部固定监听地址与持久化目录
       NANOCOS_ADDR: ":9000"
       NANOCOS_DATA_DIR: "/app/data"
-      NANOCOS_ADMIN_USER: "admin"
-      # 首次启动留空 NANOCOS_ADMIN_PASS 将自动生成 16 位高强度随机密码并打印在容器日志中（仅首次打印）
-      # 后续可通过 `docker exec nanocos cosd passwd -data-dir /app/data` 重置密码
-      NANOCOS_S3_REGION: "us-east-1"
-      NANOCOS_MAX_UPLOAD_GB: "50"
-      NANOCOS_LOG_LEVEL: "info"
-      NANOCOS_LOG_FORMAT: "json"
-      # 若部署在受控 Nginx/Caddy 反代后，可设为 "true"
-      NANOCOS_TRUST_PROXY: "false"
-      # NANOCOS_PUBLIC_URL: "https://cos.yourdomain.com"
+      # 以下配置均优先从 deploy/.env 读取，若未定义则使用默认安全兜底
+      NANOCOS_ADMIN_USER: "${NANOCOS_ADMIN_USER:-admin}"
+      NANOCOS_ADMIN_PASS: "${NANOCOS_ADMIN_PASS:-}"
+      NANOCOS_SECRET: "${NANOCOS_SECRET:-}"
+      NANOCOS_S3_REGION: "${NANOCOS_S3_REGION:-us-east-1}"
+      NANOCOS_MAX_UPLOAD_GB: "${NANOCOS_MAX_UPLOAD_GB:-50}"
+      NANOCOS_LOG_LEVEL: "${NANOCOS_LOG_LEVEL:-info}"
+      NANOCOS_LOG_FORMAT: "${NANOCOS_LOG_FORMAT:-json}"
+      NANOCOS_TRUST_PROXY: "${NANOCOS_TRUST_PROXY:-false}"
+      NANOCOS_PUBLIC_URL: "${NANOCOS_PUBLIC_URL:-}"
     volumes:
       - ./data:/app/data
     healthcheck:
