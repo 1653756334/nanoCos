@@ -28,7 +28,8 @@ services:
       NANOCOS_TRUST_PROXY: "${NANOCOS_TRUST_PROXY:-false}"
       NANOCOS_PUBLIC_URL: "${NANOCOS_PUBLIC_URL:-}"
     volumes:
-      - ./data:/app/data
+      # 宿主机数据持久化挂载路径，支持在 deploy/.env 中通过 NANOCOS_DATA_VOLUME 绑定独立数据盘
+      - "${NANOCOS_DATA_VOLUME:-./data}:/app/data"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9000/healthz"]
       interval: 30s
