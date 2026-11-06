@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { message } from 'antd';
-import { StorageObject, cosApi } from '../../../lib/api';
+import { Bucket, StorageObject, cosApi } from '../../../lib/api';
 import { getErrorMessage } from '../../../lib/errors';
 import { isTextContentType } from '../../../lib/utils';
 import { QUICK_PRESIGN_TTL, TEXT_PREVIEW_MAX_BYTES } from '../constants';
@@ -9,13 +9,15 @@ import { buildRawUrl } from '../utils/objects';
 interface UseObjectInspectorOptions {
   bucket: string;
   baseUrl: string;
+  visibility?: Bucket['visibility'];
 }
 
 /**
  * 右侧「对象详情 / 在线预览」抽屉的状态：直链、预签名链接、文本预览。
  * 通过请求序号忽略过期响应，避免快速切换对象时旧结果覆盖新结果。
  */
-export function useObjectInspector({ bucket, baseUrl }: UseObjectInspectorOptions) {
+export function useObjectInspector({ bucket, baseUrl, visibility }: UseObjectInspectorOptions) {
+  const isPublic = visibility === 'public-read';
   const [object, setObject] = useState<StorageObject | null>(null);
   const [rawUrl, setRawUrl] = useState('');
   const [presignedUrl, setPresignedUrl] = useState('');
@@ -41,17 +43,20 @@ export function useObjectInspector({ bucket, baseUrl }: UseObjectInspectorOption
     setPresignedUrl('');
 
     let activeUrl = directUrl;
-    try {
-      const res = await cosApi.presignUrl(bucket, {
-        key: obj.key,
-        method: 'GET',
-        expiresInSec: presignTtl,
-      });
-      if (isStale()) return;
-      activeUrl = res.url;
-      setPresignedUrl(res.url);
-    } catch {
-      // 预签名失败时回退到直链
+    // 公开桶直接走无签名直链，只有私有桶才需要额外请求预签名
+    if (!isPublic) {
+      try {
+        const res = await cosApi.presignUrl(bucket, {
+          key: obj.key,
+          method: 'GET',
+          expiresInSec: presignTtl,
+        });
+        if (isStale()) return;
+        activeUrl = res.url;
+        setPresignedUrl(res.url);
+      } catch {
+        // 预签名失败时回退到直链
+      }
     }
 
     if (isTextContentType(obj.contentType) && obj.sizeBytes <= TEXT_PREVIEW_MAX_BYTES) {

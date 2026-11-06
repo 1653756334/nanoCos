@@ -68,7 +68,7 @@ export function UploadModal({
           点击选择文件，或将多个文件拖拽到此区域上传
         </div>
         <div className="text-xs text-slate-500 mt-1">
-          小于 20MB 自动计算 <code className="text-blue-600">SHA-256</code> 尝试<strong>零字节极速秒传</strong>；大于 5MB 自动启用 <strong>并发分片流式上传</strong>
+          全文件大小支持 <strong>Worker 分片流式计算 SHA-256</strong> 尝试<strong>零字节极速秒传</strong>；大于 5MB 自动启用<strong>并发分片上传与断点续传</strong>
         </div>
       </div>
 

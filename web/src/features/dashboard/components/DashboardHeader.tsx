@@ -1,16 +1,31 @@
 import { Badge, Button, Space } from 'antd';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { formatBytes } from '../../../lib/utils';
 import { formatUptime } from '../format';
 
 interface DashboardHeaderProps {
   uptimeSeconds?: number;
+  diskFreeBytes?: number;
+  diskTotalBytes?: number;
   loading: boolean;
   onRefresh: () => Promise<void>;
   onCreate: () => void;
 }
 
-/** 顶部监控大盘工具栏：标题、引擎运行状态、刷新与新建按钮 */
-export function DashboardHeader({ uptimeSeconds, loading, onRefresh, onCreate }: DashboardHeaderProps) {
+/** 顶部监控大盘工具栏：标题、引擎运行状态、磁盘可用容量、刷新与新建按钮 */
+export function DashboardHeader({
+  uptimeSeconds,
+  diskFreeBytes,
+  diskTotalBytes,
+  loading,
+  onRefresh,
+  onCreate,
+}: DashboardHeaderProps) {
+  const diskText =
+    diskFreeBytes != null && diskTotalBytes
+      ? ` · 磁盘余 ${formatBytes(diskFreeBytes)} / 共 ${formatBytes(diskTotalBytes)}`
+      : '';
+
   return (
     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white border border-slate-200 rounded-md px-5 py-3.5">
       <div className="flex items-center gap-3 flex-wrap">
@@ -22,6 +37,7 @@ export function DashboardHeader({ uptimeSeconds, loading, onRefresh, onCreate }:
           text={
             <span className="text-xs text-slate-500 font-mono">
               Engine: SQLite WAL + CAS SHA-256 · 已运行 {formatUptime(uptimeSeconds)}
+              {diskText}
             </span>
           }
         />

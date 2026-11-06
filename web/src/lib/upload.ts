@@ -1,7 +1,7 @@
 import { cosApi } from './api';
+import { computeFileSHA256Progressive } from './hasher';
 import {
   computeAdaptiveChunkSize,
-  computeSHA256Hex,
   deleteMultipartResumeRecord,
   encodeObjectKey,
   formatBytes,
@@ -11,8 +11,6 @@ import {
 
 /** 小于该阈值的文件走单流 PUT，否则走分片上传 */
 export const MULTIPART_THRESHOLD = 5 * 1024 * 1024;
-/** 小于等于该阈值的文件会先计算 SHA-256 并尝试 CAS 秒传 */
-export const FAST_UPLOAD_MAX_SIZE = 20 * 1024 * 1024;
 
 const MULTIPART_CONCURRENCY = 3;
 const MULTIPART_MAX_RETRIES = 3;
@@ -29,20 +27,35 @@ export interface UploadTaskPatch {
 
 /**
  * 上传单个文件的完整策略：
- * 1. ≤20MB 先算 SHA-256 尝试 CAS 秒传；
- * 2. 未命中时 <5MB 走单流 PUT，否则走并发分片上传。
+ * 1. 使用 Web Worker + 4MB 分片流式计算 SHA-256 (内存恒定仅 4MB，主线程 0 阻塞)，优先探测 CAS 秒传池；
+ * 2. 秒传命中时 0 字节瞬间完成；
+ * 3. 未命中时 <5MB 走单流 PUT，≥5MB 自动走并发分片上传 + IndexedDB 断点续传。
  * 失败时抛出异常，由调用方决定如何展示。
  */
 export async function uploadFile(
   bucket: string,
   key: string,
   file: File,
-  report: (patch: UploadTaskPatch) => void
+  report: (patch: UploadTaskPatch) => void,
+  signal?: AbortSignal
 ): Promise<void> {
-  if (file.size <= FAST_UPLOAD_MAX_SIZE) {
-    const sha256 = await computeSHA256Hex(file);
+  // 1. Web Worker 分片流式哈希计算与 CAS 秒传探测
+  report({ status: 'hashing', progress: 0, detail: '计算文件指纹 0% (Worker 分片流)...' });
+  try {
+    const sha256 = await computeFileSHA256Progressive(
+      file,
+      (pct) => {
+        report({
+          status: 'hashing',
+          progress: pct,
+          detail: `计算文件指纹 ${pct}% (Worker 分片流)...`,
+        });
+      },
+      signal
+    );
+
     if (sha256) {
-      report({ detail: '探测 CAS 秒传池...', progress: 15 });
+      report({ status: 'hashing', progress: 100, detail: '探测 CAS 秒传池...' });
       const fastRes = await cosApi.tryFastUpload(bucket, {
         key,
         sha256,
@@ -57,6 +70,11 @@ export async function uploadFile(
         return;
       }
     }
+  } catch (err: unknown) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw err;
+    }
+    // 其他非中断异常则继续降级执行常规上传
   }
 
   report({ status: 'uploading', detail: '正在上传...' });

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,6 +60,10 @@ type SystemStats struct {
 	RecentObjects        []Object       `json:"recentObjects"`
 	TopObjects           []Object       `json:"topObjects"`
 	UptimeSeconds        int64          `json:"uptimeSeconds"`
+	DiskTotalBytes       uint64         `json:"diskTotalBytes"`
+	DiskFreeBytes        uint64         `json:"diskFreeBytes"`
+	DiskUsedBytes        uint64         `json:"diskUsedBytes"`
+	DiskUsedPercent      float64        `json:"diskUsedPercent"`
 }
 
 // NewStore 初始化 SQLite(WAL) 数据库与 CAS 物理存储引擎
@@ -775,6 +780,17 @@ func (s *Store) GetSystemStats() (*SystemStats, error) {
 		ORDER BY size_bytes DESC
 		LIMIT 6
 	`)
+
+	// 4. 查询数据存储目录所在物理磁盘的总容量与剩余空间
+	dataDir := filepath.Dir(s.dbPath)
+	if total, free, err := getDiskSpace(dataDir); err == nil && total > 0 {
+		stats.DiskTotalBytes = total
+		stats.DiskFreeBytes = free
+		if total >= free {
+			stats.DiskUsedBytes = total - free
+			stats.DiskUsedPercent = math.Round(float64(stats.DiskUsedBytes)*1000.0/float64(total)) / 10.0
+		}
+	}
 
 	return stats, nil
 }

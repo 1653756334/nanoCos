@@ -68,6 +68,7 @@ export function ExplorerPage() {
   const inspector = useObjectInspector({
     bucket: selectedBucketName,
     baseUrl,
+    visibility: currentBucket?.visibility,
   });
 
   const { copyLink, download } = useObjectLinks({

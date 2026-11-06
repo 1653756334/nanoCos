@@ -25,6 +25,10 @@ export interface SystemStats {
   recentObjects: StorageObject[];
   topObjects: StorageObject[];
   uptimeSeconds: number;
+  diskTotalBytes?: number;
+  diskFreeBytes?: number;
+  diskUsedBytes?: number;
+  diskUsedPercent?: number;
 }
 
 export interface Bucket {

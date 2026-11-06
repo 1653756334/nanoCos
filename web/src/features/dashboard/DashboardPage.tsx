@@ -30,6 +30,8 @@ export function DashboardPage() {
     <div className="space-y-4">
       <DashboardHeader
         uptimeSeconds={stats?.uptimeSeconds}
+        diskFreeBytes={stats?.diskFreeBytes}
+        diskTotalBytes={stats?.diskTotalBytes}
         loading={loading}
         onRefresh={refresh}
         onCreate={bucketForm.openCreateModal}

@@ -35,9 +35,9 @@ export function ObjectInspectorDrawer({
   onUpdatePresignTtl,
   onDeleteSingle,
 }: ObjectInspectorDrawerProps) {
-  const downloadUrl = `${presignedUrl || rawUrl}${
-    (presignedUrl || rawUrl).includes('?') ? '&' : '?'
-  }download=1`;
+  const downloadUrl = isPublicBucket
+    ? `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}download=1`
+    : `${presignedUrl || rawUrl}${(presignedUrl || rawUrl).includes('?') ? '&' : '?'}download=1`;
 
   return (
     <Drawer
@@ -170,7 +170,15 @@ export function ObjectInspectorDrawer({
           </div>
 
           {/* 3. 直链与 Markdown 引用 */}
-          <Card size="small" title="固定直链与 Markdown 引用">
+          <Card
+            size="small"
+            title={isPublicBucket ? '公开永久直链 (免鉴权无签名)' : '固定直链与 Markdown 引用'}
+            extra={
+              <Tag color={isPublicBucket ? 'green' : 'gold'} className="m-0">
+                {isPublicBucket ? '公开直链 · 永久有效' : '需要鉴权'}
+              </Tag>
+            }
+          >
             <div className="space-y-2.5">
               <Input
                 value={rawUrl}
@@ -180,11 +188,11 @@ export function ObjectInspectorDrawer({
                   <button
                     onClick={async () => {
                       await copyToClipboard(rawUrl);
-                      message.success('直链 URL 已复制');
+                      message.success(isPublicBucket ? '公开永久直链已复制' : '直链 URL 已复制');
                     }}
                     className="text-xs font-medium text-blue-600 cursor-pointer"
                   >
-                    复制 URL
+                    {isPublicBucket ? '复制公开链接' : '复制 URL'}
                   </button>
                 }
               />
@@ -215,49 +223,51 @@ export function ObjectInspectorDrawer({
             </div>
           </Card>
 
-          {/* 4. 预签名临时授权链接 */}
-          <Card
-            size="small"
-            title="预签名临时分享链接 (Presigned URL)"
-            extra={<Tag color="purple" className="m-0">支持私有桶安全外发</Tag>}
-          >
-            <div className="space-y-3">
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <span className="text-xs text-slate-500">选择授权有效期:</span>
-                <Segmented
-                  size="small"
-                  value={presignTtl}
-                  onChange={(v) => {
-                    void onUpdatePresignTtl(Number(v));
-                  }}
-                  options={PRESIGN_TTL_OPTIONS}
+          {/* 4. 预签名临时授权链接 (仅私有桶显示；公开桶本身可直接访问，无需附加临时签名后缀) */}
+          {!isPublicBucket && (
+            <Card
+              size="small"
+              title="预签名临时分享链接 (Presigned URL)"
+              extra={<Tag color="purple" className="m-0">私有桶限时授权外发</Tag>}
+            >
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="text-xs text-slate-500">选择授权有效期:</span>
+                  <Segmented
+                    size="small"
+                    value={presignTtl}
+                    onChange={(v) => {
+                      void onUpdatePresignTtl(Number(v));
+                    }}
+                    options={PRESIGN_TTL_OPTIONS}
+                  />
+                </div>
+                <Input
+                  value={presignedUrl}
+                  readOnly
+                  className="font-mono text-xs"
+                  placeholder="正在签发临时链接..."
                 />
+                <Button
+                  type="primary"
+                  block
+                  icon={<LinkOutlined />}
+                  onClick={async () => {
+                    let activeUrl = presignedUrl;
+                    if (!activeUrl) {
+                      activeUrl = await onUpdatePresignTtl(presignTtl);
+                    }
+                    if (activeUrl) {
+                      await copyToClipboard(activeUrl);
+                      message.success('带签名的临时访问链接已复制');
+                    }
+                  }}
+                >
+                  复制预签名临时链接
+                </Button>
               </div>
-              <Input
-                value={presignedUrl}
-                readOnly
-                className="font-mono text-xs"
-                placeholder="正在签发临时链接..."
-              />
-              <Button
-                type="primary"
-                block
-                icon={<LinkOutlined />}
-                onClick={async () => {
-                  let activeUrl = presignedUrl;
-                  if (!activeUrl) {
-                    activeUrl = await onUpdatePresignTtl(presignTtl);
-                  }
-                  if (activeUrl) {
-                    await copyToClipboard(activeUrl);
-                    message.success('带签名的临时访问链接已复制');
-                  }
-                }}
-              >
-                复制预签名临时链接
-              </Button>
-            </div>
-          </Card>
+            </Card>
+          )}
         </div>
       )}
     </Drawer>

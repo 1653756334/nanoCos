@@ -65,9 +65,9 @@ export function StatCards({ stats, buckets, summary, onNavigateKeys }: StatCards
         }
       />
 
-      {/* KPI 2: 物理磁盘占用 + 逻辑/物理双层对比条 */}
+      {/* KPI 2: 物理磁盘占用与主机剩余空间 */}
       <KpiCard
-        title="CAS 物理磁盘落盘 (Physical Footprint)"
+        title="CAS 物理落盘与磁盘余量 (Disk Storage)"
         icon={<HddOutlined />}
         iconClassName="bg-cyan-50 border border-cyan-100 text-cyan-600"
         main={
@@ -75,8 +75,10 @@ export function StatCards({ stats, buckets, summary, onNavigateKeys }: StatCards
             <span className="text-2xl font-bold font-mono text-slate-900 leading-none">
               {formatBytes(stats?.physicalBytes)}
             </span>
-            <span className="text-xs font-mono text-cyan-600 bg-cyan-50 px-1.5 py-0.5 rounded border border-cyan-100">
-              {(stats?.blobCount ?? 0).toLocaleString()} 独立物理块
+            <span className="text-xs font-mono font-medium text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded border border-cyan-200">
+              {stats?.diskFreeBytes != null
+                ? `余 ${formatBytes(stats.diskFreeBytes)}`
+                : `${(stats?.blobCount ?? 0).toLocaleString()} 独立物理块`}
             </span>
           </>
         }
@@ -85,12 +87,26 @@ export function StatCards({ stats, buckets, summary, onNavigateKeys }: StatCards
             <div className="h-2 w-full rounded bg-slate-100 overflow-hidden mb-2">
               <div
                 className="h-full bg-cyan-500 transition-all"
-                style={{ width: `${stats?.physicalBytes ? physicalRatio : 0}%` }}
+                style={{
+                  width: `${
+                    stats?.diskUsedPercent != null
+                      ? Math.min(100, Math.max(1, stats.diskUsedPercent))
+                      : stats?.physicalBytes
+                      ? physicalRatio
+                      : 0
+                  }%`,
+                }}
               />
             </div>
             <div className="flex items-center justify-between text-[11px] text-slate-400">
-              <span>物理/逻辑落盘比</span>
-              <span className="font-mono text-slate-600">{physicalRatio}% 磁盘占空比</span>
+              <span>
+                {stats?.diskTotalBytes ? `主机磁盘已用 ${stats.diskUsedPercent}%` : '物理/逻辑落盘比'}
+              </span>
+              <span className="font-mono text-slate-600">
+                {stats?.diskTotalBytes
+                  ? `余 ${formatBytes(stats.diskFreeBytes)} / 共 ${formatBytes(stats.diskTotalBytes)}`
+                  : `${physicalRatio}% 磁盘占空比`}
+              </span>
             </div>
           </>
         }
