@@ -11,6 +11,15 @@
   border-color: #e5e7eb;
 }
 
+button {
+  background: transparent;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Inter", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;

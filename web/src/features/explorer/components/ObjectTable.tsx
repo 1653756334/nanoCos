@@ -68,7 +68,7 @@ export function ObjectTable({
               onOpenInspector(record);
             }
           }}
-          className="flex items-center gap-2.5 text-left font-medium text-slate-800 hover:text-blue-600 transition-colors"
+          className="flex items-center gap-2.5 text-left font-medium text-slate-800 hover:text-blue-600 transition-colors bg-transparent border-0 p-0 cursor-pointer outline-none shadow-none"
         >
           <FileTypeIcon object={record} />
           <span className="break-all">{search ? record.key : record.name}</span>
