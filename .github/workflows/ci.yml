@@ -22,16 +22,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 22 & pnpm
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js 22 & cache
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: "pnpm"
+          cache-dependency-path: "./web/pnpm-lock.yaml"
 
-      - name: Enable Corepack & install frontend dependencies
+      - name: Install frontend dependencies
         working-directory: ./web
-        run: |
-          corepack enable
-          pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Frontend Typecheck, Lint & Unit Tests
         working-directory: ./web
@@ -68,7 +73,9 @@ jobs:
           go-version-file: "go.mod"
 
       - name: Run govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: "go.mod"
 
   release:
     name: Multi-Arch Release Artifacts
@@ -79,15 +86,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
       - name: Setup Node.js 22 & Build Frontend
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: "pnpm"
+          cache-dependency-path: "./web/pnpm-lock.yaml"
 
       - name: Build Embedded Web Console
         working-directory: ./web
         run: |
-          corepack enable
           pnpm install --frozen-lockfile
           pnpm run build
 
