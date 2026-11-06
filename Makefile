@@ -1,7 +1,7 @@
 VERSION ?= v1.1.0
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: all web build build-linux test race fuzz vet check-dist clean docker
+.PHONY: all web build build-linux test race fuzz vet clean docker
 
 all: web build
 
@@ -25,9 +25,6 @@ fuzz:
 	go test -fuzz=FuzzNormalizeObjectKey -fuzztime=5s ./internal/store
 	go test -fuzz=FuzzPrefixUpperBound -fuzztime=5s ./internal/store
 	go test -fuzz=FuzzS3PercentEncode -fuzztime=5s ./internal/auth
-
-check-dist: web
-	git diff --exit-code internal/web/dist
 
 docker:
 	docker build --build-arg VERSION=$(VERSION) -f deploy/Dockerfile -t nanocos:$(VERSION) .

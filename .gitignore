@@ -16,5 +16,9 @@
 *.log
 .env
 
-# 前端 node_modules
+# 前端依赖与构建产物 (保留 .gitkeep 供 Go embed 兜底编译)
 /web/node_modules/
+/web/dist/
+/internal/web/dist/*
+!/internal/web/dist/.gitkeep
+
