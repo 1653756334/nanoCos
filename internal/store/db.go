@@ -257,12 +257,19 @@ func copyFileAtomic(src, dst string) error {
 }
 
 func (s *Store) backgroundMaintenanceLoop(skipStartupGC bool) {
+	multipartTTL := 2 * time.Hour
+	if envTTL := strings.TrimSpace(os.Getenv("NANOCOS_MULTIPART_TTL")); envTTL != "" {
+		if d, err := time.ParseDuration(envTTL); err == nil && d > 0 {
+			multipartTTL = d
+		}
+	}
+
 	if !skipStartupGC {
 		select {
 		case <-s.stopCh:
 			return
 		default:
-			_ = s.ReconcileAndGC(24 * time.Hour)
+			_ = s.ReconcileAndGC(multipartTTL)
 		}
 	}
 	ticker := time.NewTicker(30 * time.Minute)
@@ -272,7 +279,7 @@ func (s *Store) backgroundMaintenanceLoop(skipStartupGC bool) {
 		case <-s.stopCh:
 			return
 		case <-ticker.C:
-			_ = s.CleanExpiredUploadsAndTokens(24 * time.Hour)
+			_ = s.CleanExpiredUploadsAndTokens(multipartTTL)
 		}
 	}
 }

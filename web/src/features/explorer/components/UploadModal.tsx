@@ -17,6 +17,8 @@ interface UploadModalProps {
   fileInputRef: RefObject<HTMLInputElement>;
   onClose: () => void;
   onClearQueue: () => void;
+  onCancelTask: (id: string) => void;
+  onCancelAll: () => void;
   onFilesSelect: (files: FileList | null) => void;
 }
 
@@ -28,8 +30,12 @@ export function UploadModal({
   fileInputRef,
   onClose,
   onClearQueue,
+  onCancelTask,
+  onCancelAll,
   onFilesSelect,
 }: UploadModalProps) {
+  const hasActive = uploadQueue.some((t) => t.status === 'uploading' || t.status === 'hashing');
+
   return (
     <Modal
       title={
@@ -41,15 +47,21 @@ export function UploadModal({
       open={open}
       onCancel={onClose}
       footer={[
-        <Button
-          key="clear"
-          onClick={onClearQueue}
-          disabled={uploadQueue.length === 0}
-        >
-          清空记录
-        </Button>,
+        hasActive ? (
+          <Button key="cancelAll" danger onClick={onCancelAll}>
+            终止全部上传
+          </Button>
+        ) : (
+          <Button
+            key="clear"
+            onClick={onClearQueue}
+            disabled={uploadQueue.length === 0}
+          >
+            清空记录
+          </Button>
+        ),
         <Button key="close" type="primary" onClick={onClose}>
-          完成
+          {hasActive ? '后台传输中 (点击关闭)' : '完成'}
         </Button>,
       ]}
       width={620}
@@ -84,26 +96,41 @@ export function UploadModal({
                   {task.name}{' '}
                   <span className="text-slate-400 font-mono">({formatBytes(task.size)})</span>
                 </span>
-                <span
-                  className={`flex items-center gap-1 font-medium ${
-                    task.status === 'fast' || task.status === 'done'
-                      ? 'text-emerald-600'
-                      : task.status === 'error'
-                      ? 'text-rose-600'
-                      : 'text-blue-600'
-                  }`}
-                >
-                  {(task.status === 'fast' || task.status === 'done') && <CheckCircleFilled />}
-                  {task.status === 'error' && <CloseCircleFilled />}
-                  {task.detail}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`flex items-center gap-1 font-medium ${
+                      task.status === 'fast' || task.status === 'done'
+                        ? 'text-emerald-600'
+                        : task.status === 'error'
+                        ? 'text-rose-600'
+                        : task.status === 'aborted'
+                        ? 'text-amber-600'
+                        : 'text-blue-600'
+                    }`}
+                  >
+                    {(task.status === 'fast' || task.status === 'done') && <CheckCircleFilled />}
+                    {(task.status === 'error' || task.status === 'aborted') && <CloseCircleFilled />}
+                    {task.detail}
+                  </span>
+                  {(task.status === 'hashing' || task.status === 'uploading') && (
+                    <Button
+                      size="small"
+                      type="text"
+                      danger
+                      className="h-5 px-1.5 text-xs text-rose-500 hover:bg-rose-50 cursor-pointer"
+                      onClick={() => onCancelTask(task.id)}
+                    >
+                      终止
+                    </Button>
+                  )}
+                </div>
               </div>
               <Progress
                 percent={task.progress}
                 size="small"
                 showInfo={false}
                 status={
-                  task.status === 'error'
+                  task.status === 'error' || task.status === 'aborted'
                     ? 'exception'
                     : task.status === 'done' || task.status === 'fast'
                     ? 'success'

@@ -16,7 +16,7 @@ const MULTIPART_CONCURRENCY = 3;
 const MULTIPART_MAX_RETRIES = 3;
 const MULTIPART_PART_TIMEOUT_MS = 60_000;
 
-export type UploadStatus = 'hashing' | 'uploading' | 'fast' | 'done' | 'error';
+export type UploadStatus = 'hashing' | 'uploading' | 'fast' | 'done' | 'error' | 'aborted';
 
 /** 上传过程中向 UI 汇报的状态增量 */
 export interface UploadTaskPatch {
@@ -79,49 +79,89 @@ export async function uploadFile(
 
   report({ status: 'uploading', detail: '正在上传...' });
   if (file.size < MULTIPART_THRESHOLD) {
-    await uploadSingleStream(bucket, key, file, (pct) => {
-      report({ progress: pct, detail: `流式上传中 ${pct}%` });
-    });
+    await uploadSingleStream(
+      bucket,
+      key,
+      file,
+      (pct) => {
+        report({ progress: pct, detail: `流式上传中 ${pct}%` });
+      },
+      signal
+    );
     report({ status: 'done', progress: 100, detail: '上传成功' });
   } else {
-    await uploadMultipart(bucket, key, file, (pct, detail) => {
-      report({ progress: pct, detail });
-    });
+    await uploadMultipart(
+      bucket,
+      key,
+      file,
+      (pct, detail) => {
+        report({ progress: pct, detail });
+      },
+      signal
+    );
     report({ status: 'done', progress: 100, detail: '分片流式合并完成' });
   }
 }
 
-/** 单流上传（XHR 以便获取上传进度） */
+/** 单流上传（XHR 以便获取上传进度，支持随 AbortSignal 瞬间中断） */
 export function uploadSingleStream(
   bucket: string,
   key: string,
   file: File,
-  onProgress: (pct: number) => void
+  onProgress: (pct: number) => void,
+  signal?: AbortSignal
 ): Promise<void> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'));
+      return;
+    }
+
     const xhr = new XMLHttpRequest();
     xhr.open('PUT', `/api/v1/buckets/${encodeURIComponent(bucket)}/objects/${encodeObjectKey(key)}`);
     xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+
+    const onAbort = () => {
+      xhr.abort();
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    if (signal) {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) {
         onProgress(Math.round((e.loaded * 100) / e.total));
       }
     };
     xhr.onload = () => {
+      if (signal) signal.removeEventListener('abort', onAbort);
       if (xhr.status >= 200 && xhr.status < 300) resolve();
       else reject(new Error(`HTTP ${xhr.status}`));
     };
-    xhr.onerror = () => reject(new Error('网络传输中断'));
+    xhr.onerror = () => {
+      if (signal) signal.removeEventListener('abort', onAbort);
+      if (signal?.aborted) {
+        reject(new DOMException('Aborted', 'AbortError'));
+      } else {
+        reject(new Error('网络传输中断'));
+      }
+    };
+    xhr.onabort = () => {
+      if (signal) signal.removeEventListener('abort', onAbort);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
     xhr.send(file);
   });
 }
 
-/** 分片上传：支持 IndexedDB 断点续传、并发、单片重试与超时，失败时清理服务端暂存分片 */
+/** 分片上传：支持 IndexedDB 断点续传、并发、单片重试与超时，支持随 AbortSignal 终止并清理暂存分片 */
 export async function uploadMultipart(
   bucket: string,
   key: string,
   file: File,
-  onProgress: (pct: number, detail: string) => void
+  onProgress: (pct: number, detail: string) => void,
+  signal?: AbortSignal
 ): Promise<void> {
   const chunkSize = computeAdaptiveChunkSize(file.size);
   const totalParts = Math.ceil(file.size / chunkSize);
@@ -178,8 +218,15 @@ export async function uploadMultipart(
   const uploadPartWithRetry = async (partNumber: number, chunk: Blob) => {
     let lastErr: unknown;
     for (let attempt = 1; attempt <= MULTIPART_MAX_RETRIES; attempt++) {
+      if (signal?.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+      }
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), MULTIPART_PART_TIMEOUT_MS);
+      const onAbort = () => controller.abort();
+      if (signal) {
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
       try {
         await cosApi.uploadMultipartPart(
           bucket,
@@ -189,9 +236,14 @@ export async function uploadMultipart(
           controller.signal
         );
         clearTimeout(timer);
+        if (signal) signal.removeEventListener('abort', onAbort);
         return;
       } catch (err) {
         clearTimeout(timer);
+        if (signal) signal.removeEventListener('abort', onAbort);
+        if (signal?.aborted) {
+          throw new DOMException('Aborted', 'AbortError');
+        }
         lastErr = err;
         if (attempt < MULTIPART_MAX_RETRIES) {
           await new Promise((r) => setTimeout(r, 400 * attempt));
@@ -206,6 +258,9 @@ export async function uploadMultipart(
   try {
     const worker = async () => {
       while (nextPart <= totalParts) {
+        if (signal?.aborted) {
+          throw new DOMException('Aborted', 'AbortError');
+        }
         const partNumber = nextPart++;
         if (uploadedPartSet.has(partNumber)) {
           continue;

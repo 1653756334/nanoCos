@@ -1,61 +1,52 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
   <defs>
-    <!-- 主 N 字符折叠渐变：霓虹电光青 -> 核心科技蓝 -->
-    <linearGradient id="nanoPrimary" x1="0%" y1="0%" x2="100%" y2="100%">
+    <!-- 无限流光主渐变：赛博青 -> 极速天蓝 -> 核心科技蓝 -> 曜石极光紫 -->
+    <linearGradient id="infinityGrad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#00F2FE" />
-      <stop offset="35%" stop-color="#0284C7" />
-      <stop offset="100%" stop-color="#2563EB" />
+      <stop offset="35%" stop-color="#38BDF8" />
+      <stop offset="70%" stop-color="#2563EB" />
+      <stop offset="100%" stop-color="#8B5CF6" />
     </linearGradient>
 
-    <!-- 右侧立柱渐变：电光蓝 -> 深度曜石靛紫 -->
-    <linearGradient id="nanoSecondary" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#4F46E5" />
-      <stop offset="100%" stop-color="#7C3AED" />
+    <!-- 交叉处立体阴影渐变 (体现莫比乌斯空间穿插层深) -->
+    <linearGradient id="crossShadow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1E1B4B" stop-opacity="0.85" />
+      <stop offset="100%" stop-color="#1E1B4B" stop-opacity="0" />
     </linearGradient>
 
-    <!-- 纳米数据粒子渐变 -->
-    <linearGradient id="nanoParticle" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#38BDF8" />
-      <stop offset="100%" stop-color="#0284C7" />
-    </linearGradient>
-
-    <!-- 柔和微辉光 -->
+    <!-- 核心微光滤镜 -->
     <filter id="nanoGlow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="3" result="blur" />
-      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+      <feGaussianBlur stdDeviation="3.5" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
     </filter>
   </defs>
 
-  <!-- 1. 右侧数据立柱 (底图层，深邃纵深) -->
+  <!-- 1. 底层穿透光轨 (后环) -->
   <path
-    d="M 94 94 L 94 36"
-    fill="none"
-    stroke="url(#nanoSecondary)"
-    stroke-width="18"
-    stroke-linecap="round"
-  />
-
-  <!-- 2. 主 N 动态折叠流线 (左立柱 + 对角切线，科技动感) -->
-  <path
-    d="M 34 94 L 34 34 L 94 94"
-    fill="none"
-    stroke="url(#nanoPrimary)"
-    stroke-width="18"
+    d="M 42 42 C 20 42 20 86 42 86 C 58 86 70 42 86 42 C 108 42 108 86 86 86 C 70 86 58 42 42 42 Z"
+    stroke="url(#infinityGrad)"
+    stroke-width="15"
     stroke-linecap="round"
     stroke-linejoin="round"
-  />
-
-  <!-- 3. 对角棱线光感 (质感高光) -->
-  <path
-    d="M 36 34 L 92 92"
     fill="none"
-    stroke="#FFFFFF"
-    stroke-width="2.5"
-    stroke-linecap="round"
-    stroke-opacity="0.35"
   />
 
-  <!-- 4. 纳米粒子点 (Nano Data Byte · 象征对象存储核心) -->
-  <circle cx="104" cy="22" r="8" fill="url(#nanoParticle)" filter="url(#nanoGlow)" />
-  <circle cx="104" cy="22" r="3.5" fill="#FFFFFF" />
+  <!-- 2. 前景立体跨越遮罩线 (从左下划向右上，形成立体咬合感) -->
+  <path
+    d="M 50 72 C 58 86 70 42 78 56"
+    stroke="url(#infinityGrad)"
+    stroke-width="15"
+    stroke-linecap="round"
+    fill="none"
+  />
+
+  <!-- 3. 交叉点景深遮蔽 (极轻微环境阴影) -->
+  <circle cx="64" cy="64" r="9" fill="url(#crossShadow)" opacity="0.4" />
+
+  <!-- 4. 纳米级量子数据节点 (象征 CAS 内容寻址与对象原子核心) -->
+  <circle cx="64" cy="64" r="5" fill="#00F2FE" filter="url(#nanoGlow)" />
+  <circle cx="64" cy="64" r="2.2" fill="#FFFFFF" />
 </svg>

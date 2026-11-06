@@ -87,15 +87,21 @@ export function ExplorerPage() {
   const [renameTarget, setRenameTarget] = useState<StorageObject | null>(null);
   const [pageDragOver, setPageDragOver] = useState(false);
 
-  const { queue: uploadQueue, activeCount: uploadingCount, uploadFiles, clear: clearUploadQueue } =
-    useUploadQueue({
-      bucket: selectedBucketName,
-      prefix: browser.prefix,
-      onFinished: async () => {
-        objectList.refetch();
-        await refreshOverview();
-      },
-    });
+  const {
+    queue: uploadQueue,
+    activeCount: uploadingCount,
+    uploadFiles,
+    clear: clearUploadQueue,
+    cancelTask,
+    cancelAll: cancelAllUploads,
+  } = useUploadQueue({
+    bucket: selectedBucketName,
+    prefix: browser.prefix,
+    onFinished: async () => {
+      objectList.refetch();
+      await refreshOverview();
+    },
+  });
 
   // 操作处理
   const handleSelectBucket = (name: string) => {
@@ -271,6 +277,8 @@ export function ExplorerPage() {
         fileInputRef={fileInputRef}
         onClose={() => setUploadModalOpen(false)}
         onClearQueue={clearUploadQueue}
+        onCancelTask={cancelTask}
+        onCancelAll={cancelAllUploads}
         onFilesSelect={(files) => {
           void uploadFiles(files);
         }}
