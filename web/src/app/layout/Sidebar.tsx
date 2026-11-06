@@ -1,6 +1,5 @@
 import { Menu, Progress } from 'antd';
 import {
-  CloudServerOutlined,
   DashboardOutlined,
   FolderOpenOutlined,
   GlobalOutlined,
@@ -8,6 +7,7 @@ import {
   LockOutlined,
 } from '@ant-design/icons';
 import { useLocation, useMatch, useNavigate } from 'react-router-dom';
+import { NanoLogo } from '../../components/NanoLogo';
 import { Bucket, SystemStats } from '../../lib/api';
 import { routes } from '../../lib/routes';
 import { formatBytes } from '../../lib/utils';
@@ -45,9 +45,7 @@ export function SidebarContent({ collapsed, buckets, stats }: SidebarContentProp
         {/* 顶部品牌栏 - 与右侧 Header 56px 严格对齐 */}
         <div className="h-14 px-4 flex items-center justify-between border-b border-slate-200">
           <div className="flex items-center gap-2.5 overflow-hidden">
-            <div className="w-7 h-7 rounded bg-blue-600 text-white flex items-center justify-center text-sm shrink-0">
-              <CloudServerOutlined />
-            </div>
+            <NanoLogo size={28} className="rounded shrink-0" />
             {!collapsed && (
               <div className="flex items-center gap-2">
                 <span className="font-bold text-[15px] text-slate-900 tracking-tight">

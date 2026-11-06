@@ -2,11 +2,11 @@ import { useState } from 'react';
 import { Button, Form, Input, Typography, message } from 'antd';
 import {
   ArrowRightOutlined,
-  CloudServerOutlined,
   CodeOutlined,
   LockOutlined,
   UserOutlined,
 } from '@ant-design/icons';
+import { NanoLogo } from '../../components/NanoLogo';
 import { cosApi } from '../../lib/api';
 import { getErrorMessage } from '../../lib/errors';
 
@@ -51,9 +51,7 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
         <div className="bg-white border border-slate-200 rounded-[6px] shadow-sm p-7 sm:p-8">
           {/* 品牌与标题区 */}
           <div className="flex flex-col items-center text-center mb-6">
-            <div className="w-10 h-10 rounded bg-blue-600 text-white flex items-center justify-center text-lg mb-3 shadow-sm">
-              <CloudServerOutlined />
-            </div>
+            <NanoLogo size={46} className="mb-3 rounded-lg shadow-sm" />
             <div className="flex items-center gap-2">
               <span className="font-bold text-xl text-slate-900 tracking-tight">
                 NanoCOS
