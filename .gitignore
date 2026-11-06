@@ -1,0 +1,20 @@
+# 运行时存储目录与编译产物
+/data/
+/deploy/data/
+/backups/
+/bin/
+/cosd
+/cosd.exe
+/cosd.exe~
+/cosd-linux-amd64
+*.exe
+*.exe~
+*.db
+*.db-wal
+*.db-shm
+*.key
+*.log
+.env
+
+# 前端 node_modules
+/web/node_modules/

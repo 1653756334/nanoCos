@@ -1,0 +1,491 @@
+openapi: 3.0.3
+info:
+  title: NanoCOS REST & Direct Gateway API
+  version: 1.1.0
+  description: |
+    NanoCOS 现代 RESTful 控制面与数据面 API 规范 (`/api/v1/*`、`/raw/*`、`/healthz`、`/readyz`、`/metrics`)。
+    S3 兼容协议接口位于 `/s3/*`（或根路径自动嗅探），详见 `README.md` 中的 S3 兼容性矩阵。
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:9000
+    description: 本地默认服务节点
+
+components:
+  securitySchemes:
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: nanocos_token
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: 管理员 Token 或 `<AccessKey>:<SecretKey>`
+    CosAccessKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Cos-Access-Key
+      description: 配合 `X-Cos-Secret-Key` 请求头使用
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [code, error]
+      properties:
+        code:
+          type: string
+          example: NoSuchBucket
+          description: 稳定的机器可读错误码
+        error:
+          type: string
+          example: 存储桶不存在
+          description: 人类可读的错误详情
+
+    Bucket:
+      type: object
+      required: [name, visibility, quotaBytes, corsOrigins, createdAt, objectCount, usedBytes]
+      properties:
+        name:
+          type: string
+          example: assets
+        visibility:
+          type: string
+          enum: [private, public-read]
+        quotaBytes:
+          type: integer
+          format: int64
+          description: 容量配额字节数 (0 表示不限制)
+        corsOrigins:
+          type: string
+          example: "*"
+        createdAt:
+          type: string
+          format: date-time
+        objectCount:
+          type: integer
+          format: int64
+        usedBytes:
+          type: integer
+          format: int64
+
+    StorageObject:
+      type: object
+      required: [id, bucket, key, name, parentDir, isFolder, sizeBytes, contentType, etag, updatedAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        bucket:
+          type: string
+        key:
+          type: string
+        name:
+          type: string
+        parentDir:
+          type: string
+        isFolder:
+          type: boolean
+        blobSha256:
+          type: string
+        sizeBytes:
+          type: integer
+          format: int64
+        contentType:
+          type: string
+        etag:
+          type: string
+        customMeta:
+          type: object
+          additionalProperties:
+            type: string
+        updatedAt:
+          type: string
+          format: date-time
+
+    DirectoryListing:
+      type: object
+      required: [bucket, prefix, breadcrumbs, items, totalCount]
+      properties:
+        bucket:
+          type: string
+        prefix:
+          type: string
+        breadcrumbs:
+          type: array
+          items:
+            type: string
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/StorageObject"
+        totalCount:
+          type: integer
+          format: int64
+
+    AccessKeyItem:
+      type: object
+      required: [accessKey, secretKey, name, allowedBuckets, permission, createdAt]
+      properties:
+        accessKey:
+          type: string
+        secretKey:
+          type: string
+        name:
+          type: string
+        allowedBuckets:
+          type: string
+        permission:
+          type: string
+          enum: [read, readwrite, admin]
+        createdAt:
+          type: string
+          format: date-time
+
+paths:
+  /healthz:
+    get:
+      summary: 存活探针 (Liveness Probe)
+      responses:
+        "200":
+          description: 服务存活
+  /readyz:
+    get:
+      summary: 就绪探针 (Readiness Probe)
+      responses:
+        "200":
+          description: SQLite 与 CAS 存储目录就绪（包含 reconciling 状态）
+        "503":
+          description: 存储未就绪
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /metrics:
+    get:
+      summary: Prometheus 文本监控指标
+      responses:
+        "200":
+          description: Prometheus exposition format 指标输出
+
+  /api/v1/auth/login:
+    post:
+      summary: 管理员登录
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        "200":
+          description: 登录成功并种下 HttpOnly Cookie `nanocos_token`
+        "401":
+          description: 用户名或密码错误
+        "429":
+          description: 登录失败次数过多触发防爆破锁定
+
+  /api/v1/auth/logout:
+    post:
+      summary: 管理员登出并持久化吊销当前 Token
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: 登出成功
+
+  /api/v1/auth/me:
+    get:
+      summary: 查询当前登录会话与网关端点信息
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: 当前认证身份
+
+  /api/v1/auth/account:
+    put:
+      summary: 修改管理员用户名或登录密码
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword]
+              properties:
+                currentPassword:
+                  type: string
+                newUsername:
+                  type: string
+                newPassword:
+                  type: string
+      responses:
+        "200":
+          description: 修改成功并签发新 Token
+
+  /api/v1/stats:
+    get:
+      summary: 获取全局存储统计与 CAS 去重指标
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+      responses:
+        "200":
+          description: 系统概览指标
+
+  /api/v1/buckets:
+    get:
+      summary: 列出有权访问的存储桶
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+        - CosAccessKeyAuth: []
+      responses:
+        "200":
+          description: 存储桶列表
+    post:
+      summary: 创建存储桶
+      security:
+        - CookieAuth: []
+        - BearerAuth: []
+        - CosAccessKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                visibility:
+                  type: string
+                  enum: [private, public-read]
+                quotaBytes:
+                  type: integer
+                  format: int64
+                corsOrigins:
+                  type: string
+      responses:
+        "201":
+          description: 创建成功
+
+  /api/v1/buckets/{bucket}:
+    parameters:
+      - name: bucket
+        in: path
+        required: true
+        schema:
+          type: string
+    put:
+      summary: 更新存储桶权限、配额与 CORS 策略
+      responses:
+        "200":
+          description: 更新成功
+    delete:
+      summary: 删除存储桶
+      parameters:
+        - name: force
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: 删除成功
+
+  /api/v1/buckets/{bucket}/objects:
+    parameters:
+      - name: bucket
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: 分页浏览存储桶内目录与对象
+      parameters:
+        - name: prefix
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: 目录分页结果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DirectoryListing"
+    delete:
+      summary: 按 Key 删除对象或递归删除目录
+      parameters:
+        - name: key
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 删除成功
+
+  /api/v1/buckets/{bucket}/fast-upload:
+    post:
+      summary: 基于 CAS SHA-256 指纹探测秒传（含跨租户权限校验）
+      parameters:
+        - name: bucket
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 秒传探测结果
+
+  /api/v1/buckets/{bucket}/presign:
+    post:
+      summary: 签发限时防篡改预签名上传/下载 URL
+      parameters:
+        - name: bucket
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 预签名 URL
+
+  /api/v1/buckets/{bucket}/multipart/init:
+    post:
+      summary: 初始化并发分片上传会话
+      parameters:
+        - name: bucket
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "201":
+          description: 返回 uploadId
+
+  /api/v1/buckets/{bucket}/multipart/{uploadId}:
+    parameters:
+      - name: bucket
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: uploadId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      summary: 查询分片上传进度与已上传分片列表（用于断点续传）
+      responses:
+        "200":
+          description: 已上传分片列表
+    delete:
+      summary: 取消分片上传并清理暂存分片文件
+      responses:
+        "200":
+          description: 清理完成
+
+  /api/v1/buckets/{bucket}/multipart/{uploadId}/{partNumber}:
+    put:
+      summary: 上传单个分片 (1..10000)
+      parameters:
+        - name: bucket
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: uploadId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: partNumber
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 分片落盘成功
+
+  /api/v1/buckets/{bucket}/multipart/{uploadId}/complete:
+    post:
+      summary: 流式合并所有分片并完成 CAS 原子入库
+      parameters:
+        - name: bucket
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: uploadId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 合并完成
+
+  /api/v1/access-keys:
+    get:
+      summary: 列出所有 AccessKey/SecretKey
+      responses:
+        "200":
+          description: 密钥列表
+    post:
+      summary: 签发新的 AccessKey/SecretKey
+      responses:
+        "201":
+          description: 签发成功
+
+  /api/v1/admin/scrub:
+    post:
+      summary: 全量校验底层 CAS 物理块 SHA-256 完整性
+      responses:
+        "200":
+          description: 巡检结果
+
+  /api/v1/admin/gc:
+    post:
+      summary: 触发元数据与物理块对账及孤儿块回收
+      responses:
+        "200":
+          description: 对账完成
+
+  /api/v1/admin/backup:
+    post:
+      summary: 基于 SQLite VACUUM INTO 执行在线一致性热备份
+      responses:
+        "200":
+          description: 备份完成

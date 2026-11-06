@@ -1,0 +1,32 @@
+services:
+  nanocos:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        VERSION: v1.1.0
+    container_name: nanocos
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    environment:
+      NANOCOS_ADDR: ":9000"
+      NANOCOS_DATA_DIR: "/app/data"
+      NANOCOS_ADMIN_USER: "admin"
+      # 首次启动留空 NANOCOS_ADMIN_PASS 将自动生成 16 位高强度随机密码并打印在容器日志中（仅首次打印）
+      # 后续可通过 `docker exec nanocos cosd passwd -data-dir /app/data` 重置密码
+      NANOCOS_S3_REGION: "us-east-1"
+      NANOCOS_MAX_UPLOAD_GB: "50"
+      NANOCOS_LOG_LEVEL: "info"
+      NANOCOS_LOG_FORMAT: "json"
+      # 若部署在受控 Nginx/Caddy 反代后，可设为 "true"
+      NANOCOS_TRUST_PROXY: "false"
+      # NANOCOS_PUBLIC_URL: "https://cos.yourdomain.com"
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

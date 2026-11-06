@@ -1,0 +1,114 @@
+name: CI & Release
+
+on:
+  push:
+    branches: ["main", "master"]
+    tags: ["v*"]
+  pull_request:
+    branches: ["main", "master"]
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22 & pnpm
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enable Corepack & install frontend dependencies
+        working-directory: ./web
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Frontend Typecheck & Unit Tests
+        working-directory: ./web
+        run: |
+          pnpm run lint
+          pnpm test
+          pnpm run build
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+
+      - name: Go Vet & Unit Tests
+        run: |
+          go vet ./...
+          go test -v ./...
+
+      - name: Build cosd binary
+        run: |
+          go build -trimpath -ldflags="-s -w -X main.version=ci" ./cmd/cosd
+
+  security:
+    name: Security & Vulnerability Check (govulncheck)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+
+      - name: Run govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  release:
+    name: Multi-Arch Release Artifacts
+    needs: [verify, security]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22 & Build Frontend
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build Embedded Web Console
+        working-directory: ./web
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm run build
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+
+      - name: Cross-compile Multi-Arch Binaries & Checksums
+        shell: bash
+        run: |
+          mkdir -p dist-release
+          VERSION="${GITHUB_REF_NAME}"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o dist-release/cosd-linux-amd64 ./cmd/cosd
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o dist-release/cosd-linux-arm64 ./cmd/cosd
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o dist-release/cosd-darwin-arm64 ./cmd/cosd
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o dist-release/cosd-windows-amd64.exe ./cmd/cosd
+          cd dist-release
+          sha256sum cosd-* > SHA256SUMS.txt
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist-release/*
+          generate_release_notes: true
