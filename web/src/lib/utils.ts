@@ -7,6 +7,23 @@ const UNIT_MULTIPLIERS: Record<QuotaUnit, number> = {
   GB: 1024 * 1024 * 1024,
 };
 
+/** 对象 key 按 `/` 分段做 URL 编码，保留目录分隔符 */
+export function encodeObjectKey(key: string): string {
+  return key.split('/').map(encodeURIComponent).join('/');
+}
+
+/** 判断 Content-Type 是否属于可直接文本预览/展示为代码的类型 */
+export function isTextContentType(contentType?: string): boolean {
+  const ct = (contentType || '').toLowerCase();
+  return (
+    ct.startsWith('text/') ||
+    ct.includes('json') ||
+    ct.includes('javascript') ||
+    ct.includes('xml') ||
+    ct.includes('yaml')
+  );
+}
+
 export function formatBytes(bytes?: number): string {
   if (!bytes || bytes <= 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];

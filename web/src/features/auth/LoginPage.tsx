@@ -9,15 +9,17 @@ import {
   DatabaseOutlined,
   ArrowRightOutlined,
 } from '@ant-design/icons';
-import { cosApi } from '../lib/api';
+import { cosApi } from '../../lib/api';
+import { getErrorMessage } from '../../lib/errors';
 
 const { Title, Text, Paragraph } = Typography;
 
-interface LoginViewProps {
-  onSuccess: (username: string) => void;
+interface LoginPageProps {
+  /** 登录成功后调用，父级负责刷新登录态；返回 Promise 时会等待其完成 */
+  onSuccess: (username: string) => void | Promise<void>;
 }
 
-export function LoginView({ onSuccess }: LoginViewProps) {
+export function LoginPage({ onSuccess }: LoginPageProps) {
   const [loading, setLoading] = useState(false);
 
   const handleFinish = async (values: { username: string; password: string }) => {
@@ -25,9 +27,9 @@ export function LoginView({ onSuccess }: LoginViewProps) {
     try {
       const res = await cosApi.login(values.username.trim(), values.password);
       message.success('登录成功，欢迎进入 NanoCOS 对象存储控制台');
-      onSuccess(res.username);
-    } catch (err: any) {
-      message.error(err.message || '账号或密码错误');
+      await onSuccess(res.username);
+    } catch (err: unknown) {
+      message.error(getErrorMessage(err, '账号或密码错误'));
     } finally {
       setLoading(false);
     }

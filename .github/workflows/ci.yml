@@ -33,9 +33,10 @@ jobs:
           corepack enable
           pnpm install --frozen-lockfile
 
-      - name: Frontend Typecheck & Unit Tests
+      - name: Frontend Typecheck, Lint & Unit Tests
         working-directory: ./web
         run: |
+          pnpm run typecheck
           pnpm run lint
           pnpm test
           pnpm run build
