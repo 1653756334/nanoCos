@@ -1,9 +1,9 @@
 # 阶段 1: 使用 pnpm --frozen-lockfile 可复现构建前端静态资源至 internal/web/dist
 FROM node:22-alpine AS web-builder
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@10 --activate
 WORKDIR /src/web
-COPY web/package.json web/pnpm-lock.yaml ./
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml* ./
 RUN pnpm install --frozen-lockfile
 COPY web/ ./
 RUN pnpm run build
