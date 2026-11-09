@@ -165,6 +165,7 @@ export function ExplorerPage() {
       className="space-y-4 relative"
       onDragOver={(e) => {
         e.preventDefault();
+        if (uploadModalOpen) return;
         if (!pageDragOver) setPageDragOver(true);
       }}
       onDragLeave={(e) => {
@@ -173,6 +174,7 @@ export function ExplorerPage() {
       onDrop={(e) => {
         e.preventDefault();
         setPageDragOver(false);
+        if (uploadModalOpen) return;
         if (e.dataTransfer.files?.length || e.dataTransfer.items?.length) {
           setUploadModalOpen(true);
           void uploadDataTransfer(e.dataTransfer);

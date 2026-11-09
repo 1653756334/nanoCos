@@ -88,9 +88,13 @@ export function UploadModal({
 
       <div
         onClick={() => fileInputRef.current?.click()}
-        onDragOver={(e) => e.preventDefault()}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
         onDrop={(e) => {
           e.preventDefault();
+          e.stopPropagation();
           if (onDropDataTransfer) {
             onDropDataTransfer(e.dataTransfer);
           } else {
