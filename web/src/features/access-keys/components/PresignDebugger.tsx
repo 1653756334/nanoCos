@@ -13,6 +13,7 @@ interface PresignDebuggerProps {
 export function PresignDebugger({ buckets }: PresignDebuggerProps) {
   const {
     bucket,
+    isPublicBucket,
     setBucket,
     objectKey,
     setObjectKey,
@@ -53,7 +54,10 @@ export function PresignDebugger({ buckets }: PresignDebuggerProps) {
               value={bucket || undefined}
               onChange={setBucket}
               placeholder="选择存储桶"
-              options={buckets.map((b) => ({ value: b.name, label: b.name }))}
+              options={buckets.map((b) => ({
+                value: b.name,
+                label: `${b.name} (${b.visibility === 'public-read' ? '公开只读' : '私有'})`,
+              }))}
             />
           </div>
           <div>
@@ -64,11 +68,17 @@ export function PresignDebugger({ buckets }: PresignDebuggerProps) {
               onChange={(v) => setMethod(v as PresignMethod)}
               options={[
                 { label: 'PUT (前端直传)', value: 'PUT' },
-                { label: 'GET (限时下载)', value: 'GET' },
+                { label: 'GET (限时下载)', value: 'GET', disabled: isPublicBucket },
               ]}
             />
           </div>
         </div>
+
+        {isPublicBucket && (
+          <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            当前存储桶为<strong>公开只读</strong>，所有文件天然支持永久直链下载（设置 GET 限时签名无意义，访问者去除参数即可永久访问），因此仅支持签发 <code>PUT</code> 临时上传链接。
+          </div>
+        )}
 
         <div>
           <div className="text-xs text-slate-500 mb-1">目标对象路径 (Object Key)</div>

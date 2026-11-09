@@ -1,4 +1,4 @@
-import { Button, Card, Descriptions, Drawer, Image, Input, Popconfirm, Segmented, Space, Tag, Typography, message } from 'antd';
+import { Button, Card, Descriptions, Drawer, Image, Input, Popconfirm, Segmented, Space, Spin, Tag, Typography, message } from 'antd';
 import {
   CopyOutlined,
   DeleteOutlined,
@@ -17,10 +17,12 @@ interface ObjectInspectorDrawerProps {
   rawUrl: string;
   presignedUrl: string;
   presignTtl: number;
+  loadingPresign?: boolean;
   textPreview: string | null;
   isPublicBucket: boolean;
   onClose: () => void;
   onUpdatePresignTtl: (ttl: number) => Promise<string>;
+  onDownload: (obj: StorageObject) => void;
   onDeleteSingle: (obj: StorageObject) => void;
 }
 
@@ -29,15 +31,20 @@ export function ObjectInspectorDrawer({
   rawUrl,
   presignedUrl,
   presignTtl,
+  loadingPresign = false,
   textPreview,
   isPublicBucket,
   onClose,
   onUpdatePresignTtl,
+  onDownload,
   onDeleteSingle,
 }: ObjectInspectorDrawerProps) {
-  const downloadUrl = isPublicBucket
-    ? `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}download=1`
-    : `${presignedUrl || rawUrl}${(presignedUrl || rawUrl).includes('?') ? '&' : '?'}download=1`;
+  const mediaPreviewSrc = isPublicBucket ? rawUrl : presignedUrl || rawUrl;
+
+  const ensurePresignedUrl = async (): Promise<string> => {
+    if (presignedUrl) return presignedUrl;
+    return onUpdatePresignTtl(presignTtl);
+  };
 
   return (
     <Drawer
@@ -56,15 +63,14 @@ export function ObjectInspectorDrawer({
       extra={
         inspectObj && (
           <Space>
-            <a
-              href={downloadUrl}
-              target="_blank"
-              rel="noreferrer"
+            <Button
+              size="small"
+              type="primary"
+              icon={<DownloadOutlined />}
+              onClick={() => onDownload(inspectObj)}
             >
-              <Button size="small" type="primary" icon={<DownloadOutlined />}>
-                下载
-              </Button>
-            </a>
+              下载
+            </Button>
             <Popconfirm
               title="确定永久删除该对象？"
               onConfirm={() => onDeleteSingle(inspectObj)}
@@ -82,21 +88,26 @@ export function ObjectInspectorDrawer({
         <div className="space-y-5">
           {/* 1. 媒体在线预览画布 */}
           <div className="rounded-xl bg-slate-900 border border-slate-200 p-4 flex items-center justify-center min-h-[220px] overflow-hidden">
-            {inspectObj.contentType.toLowerCase().startsWith('image/') ? (
+            {!isPublicBucket && loadingPresign && !presignedUrl ? (
+              <div className="py-10 text-center space-y-2">
+                <Spin />
+                <div className="text-xs text-slate-400">正在签发私有预览授权...</div>
+              </div>
+            ) : inspectObj.contentType.toLowerCase().startsWith('image/') ? (
               <Image
-                src={presignedUrl || rawUrl}
+                src={mediaPreviewSrc}
                 alt={inspectObj.name}
                 style={{ maxHeight: 320, objectFit: 'contain' }}
               />
             ) : inspectObj.contentType.toLowerCase().startsWith('video/') ? (
               <video
-                src={presignedUrl || rawUrl}
+                src={mediaPreviewSrc}
                 controls
                 preload="metadata"
                 className="w-full max-h-[320px] rounded-lg"
               />
             ) : inspectObj.contentType.toLowerCase().startsWith('audio/') ? (
-              <audio src={presignedUrl || rawUrl} controls className="w-full" />
+              <audio src={mediaPreviewSrc} controls className="w-full" />
             ) : textPreview !== null ? (
               <div className="w-full">
                 <div className="flex items-center justify-between text-xs text-slate-400 mb-2 pb-1.5 border-b border-slate-800">
@@ -169,62 +180,59 @@ export function ObjectInspectorDrawer({
             </Descriptions>
           </div>
 
-          {/* 3. 直链与 Markdown 引用 */}
-          <Card
-            size="small"
-            title={isPublicBucket ? '公开永久直链 (免鉴权无签名)' : '固定直链与 Markdown 引用'}
-            extra={
-              <Tag color={isPublicBucket ? 'green' : 'gold'} className="m-0">
-                {isPublicBucket ? '公开直链 · 永久有效' : '需要鉴权'}
-              </Tag>
-            }
-          >
-            <div className="space-y-2.5">
-              <Input
-                value={rawUrl}
-                readOnly
-                className="font-mono text-xs"
-                addonAfter={
-                  <button
+          {/* 3. 外链分享与引用：公开桶仅展示永久直链；私有桶仅展示预签名临时授权链接（不再展示 403 无签名死链） */}
+          {isPublicBucket ? (
+            <Card
+              size="small"
+              title="公开永久直链与引用 (免鉴权无签名)"
+              extra={
+                <Tag color="green" className="m-0">
+                  公开直链 · 永久有效
+                </Tag>
+              }
+            >
+              <div className="space-y-2.5">
+                <Input
+                  value={rawUrl}
+                  readOnly
+                  className="font-mono text-xs"
+                  addonAfter={
+                    <button
+                      onClick={async () => {
+                        await copyToClipboard(rawUrl);
+                        message.success('公开永久直链已复制');
+                      }}
+                      className="text-xs font-medium text-blue-600 cursor-pointer"
+                    >
+                      复制公开链接
+                    </button>
+                  }
+                />
+                <div className="flex gap-2">
+                  <Button
+                    size="small"
+                    icon={<CopyOutlined />}
                     onClick={async () => {
-                      await copyToClipboard(rawUrl);
-                      message.success(isPublicBucket ? '公开永久直链已复制' : '直链 URL 已复制');
+                      await copyToClipboard(`![${inspectObj.name}](${rawUrl})`);
+                      message.success('Markdown 格式已复制');
                     }}
-                    className="text-xs font-medium text-blue-600 cursor-pointer"
                   >
-                    {isPublicBucket ? '复制公开链接' : '复制 URL'}
-                  </button>
-                }
-              />
-              <div className="flex gap-2">
-                <Button
-                  size="small"
-                  icon={<CopyOutlined />}
-                  onClick={async () => {
-                    const targetUrl = !isPublicBucket && presignedUrl ? presignedUrl : rawUrl;
-                    await copyToClipboard(`![${inspectObj.name}](${targetUrl})`);
-                    message.success('Markdown 格式已复制');
-                  }}
-                >
-                  复制 Markdown
-                </Button>
-                <Button
-                  size="small"
-                  icon={<CopyOutlined />}
-                  onClick={async () => {
-                    const targetUrl = !isPublicBucket && presignedUrl ? presignedUrl : rawUrl;
-                    await copyToClipboard(`<img src="${targetUrl}" alt="${inspectObj.name}" />`);
-                    message.success('HTML 标签已复制');
-                  }}
-                >
-                  复制 HTML
-                </Button>
+                    复制 Markdown
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={<CopyOutlined />}
+                    onClick={async () => {
+                      await copyToClipboard(`<img src="${rawUrl}" alt="${inspectObj.name}" />`);
+                      message.success('HTML 标签已复制');
+                    }}
+                  >
+                    复制 HTML
+                  </Button>
+                </div>
               </div>
-            </div>
-          </Card>
-
-          {/* 4. 预签名临时授权链接 (仅私有桶显示；公开桶本身可直接访问，无需附加临时签名后缀) */}
-          {!isPublicBucket && (
+            </Card>
+          ) : (
             <Card
               size="small"
               title="预签名临时分享链接 (Presigned URL)"
@@ -236,6 +244,7 @@ export function ObjectInspectorDrawer({
                   <Segmented
                     size="small"
                     value={presignTtl}
+                    disabled={loadingPresign}
                     onChange={(v) => {
                       void onUpdatePresignTtl(Number(v));
                     }}
@@ -248,23 +257,49 @@ export function ObjectInspectorDrawer({
                   className="font-mono text-xs"
                   placeholder="正在签发临时链接..."
                 />
-                <Button
-                  type="primary"
-                  block
-                  icon={<LinkOutlined />}
-                  onClick={async () => {
-                    let activeUrl = presignedUrl;
-                    if (!activeUrl) {
-                      activeUrl = await onUpdatePresignTtl(presignTtl);
-                    }
-                    if (activeUrl) {
-                      await copyToClipboard(activeUrl);
-                      message.success('带签名的临时访问链接已复制');
-                    }
-                  }}
-                >
-                  复制预签名临时链接
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="primary"
+                    className="flex-1"
+                    icon={<LinkOutlined />}
+                    loading={loadingPresign}
+                    onClick={async () => {
+                      const activeUrl = await ensurePresignedUrl();
+                      if (activeUrl) {
+                        await copyToClipboard(activeUrl);
+                        message.success('带签名的临时访问链接已复制');
+                      }
+                    }}
+                  >
+                    复制预签名临时链接
+                  </Button>
+                  <Button
+                    icon={<CopyOutlined />}
+                    disabled={loadingPresign}
+                    onClick={async () => {
+                      const activeUrl = await ensurePresignedUrl();
+                      if (activeUrl) {
+                        await copyToClipboard(`![${inspectObj.name}](${activeUrl})`);
+                        message.success('带临时签名的 Markdown 已复制');
+                      }
+                    }}
+                  >
+                    复制 Markdown
+                  </Button>
+                  <Button
+                    icon={<CopyOutlined />}
+                    disabled={loadingPresign}
+                    onClick={async () => {
+                      const activeUrl = await ensurePresignedUrl();
+                      if (activeUrl) {
+                        await copyToClipboard(`<img src="${activeUrl}" alt="${inspectObj.name}" />`);
+                        message.success('带临时签名的 HTML 已复制');
+                      }
+                    }}
+                  >
+                    复制 HTML
+                  </Button>
+                </div>
               </div>
             </Card>
           )}

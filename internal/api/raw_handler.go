@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"nanocos/internal/auth"
 	"nanocos/internal/store"
@@ -121,12 +122,15 @@ func (s *Server) handleRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 权限校验：公开读桶直接放行；私有桶要求请求头认证通过或 Query 预签名校验通过
-	if b.Visibility != "public-read" {
+	// 权限校验：若 URL 显式携带预签名参数，则无论公开桶或私有桶均校验签名与有效期；
+	// 公开读桶在无预签名参数时直接放行；私有桶要求请求头认证通过或 Query 预签名校验通过
+	q := r.URL.Query()
+	hasCustomPresign := q.Get("sig") != "" || q.Get("expires") != ""
+	if b.Visibility != "public-read" || hasCustomPresign {
 		principal := auth.FromContext(r.Context())
-		if !principal.CanAccess(bucketName, false) {
+		if hasCustomPresign || !principal.CanAccess(bucketName, false) {
 			if p, ok := s.auth.VerifyPresignedQuery(r, bucketName, rawKey); !ok || !p.CanAccess(bucketName, false) {
-				writeJSONError(w, http.StatusForbidden, "该存储桶为私有空间，需要有效签名或访问凭证")
+				writeJSONError(w, http.StatusForbidden, "预签名链接无效或已过期，或存储桶需要有效访问凭证")
 				return
 			}
 		}
@@ -170,10 +174,22 @@ func (s *Server) serveResolvedObject(w http.ResponseWriter, r *http.Request, b *
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'")
 
-	if b.Visibility == "public-read" {
+	if b.Visibility == "public-read" && r.URL.Query().Get("expires") == "" {
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 	} else {
-		w.Header().Set("Cache-Control", "private, max-age=3600")
+		maxAge := int64(3600)
+		if expStr := r.URL.Query().Get("expires"); expStr != "" {
+			if expUnix, err := strconv.ParseInt(expStr, 10, 64); err == nil {
+				remain := expUnix - time.Now().Unix()
+				if remain < 0 {
+					remain = 0
+				}
+				if remain < maxAge {
+					maxAge = remain
+				}
+			}
+		}
+		w.Header().Set("Cache-Control", fmt.Sprintf("private, max-age=%d", maxAge))
 	}
 
 	safeFilename := sanitizeDispositionFilename(obj.Name)

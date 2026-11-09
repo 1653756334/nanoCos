@@ -294,10 +294,12 @@ export function ExplorerPage() {
         rawUrl={inspector.rawUrl}
         presignedUrl={inspector.presignedUrl}
         presignTtl={inspector.presignTtl}
+        loadingPresign={inspector.loadingPresign}
         textPreview={inspector.textPreview}
         isPublicBucket={isPublicBucket}
         onClose={inspector.close}
         onUpdatePresignTtl={inspector.refreshPresigned}
+        onDownload={download}
         onDeleteSingle={handleDeleteSingle}
       />
 

@@ -22,6 +22,7 @@ export function useObjectInspector({ bucket, baseUrl, visibility }: UseObjectIns
   const [rawUrl, setRawUrl] = useState('');
   const [presignedUrl, setPresignedUrl] = useState('');
   const [presignTtl, setPresignTtl] = useState(QUICK_PRESIGN_TTL);
+  const [loadingPresign, setLoadingPresign] = useState(false);
   const [textPreview, setTextPreview] = useState<string | null>(null);
   const requestSeq = useRef(0);
 
@@ -45,6 +46,7 @@ export function useObjectInspector({ bucket, baseUrl, visibility }: UseObjectIns
     let activeUrl = directUrl;
     // 公开桶直接走无签名直链，只有私有桶才需要额外请求预签名
     if (!isPublic) {
+      setLoadingPresign(true);
       try {
         const res = await cosApi.presignUrl(bucket, {
           key: obj.key,
@@ -55,8 +57,12 @@ export function useObjectInspector({ bucket, baseUrl, visibility }: UseObjectIns
         activeUrl = res.url;
         setPresignedUrl(res.url);
       } catch {
-        // 预签名失败时回退到直链
+        // 预签名失败时回退到直链（同源 Cookie 仍可加载预览）
+      } finally {
+        if (!isStale()) setLoadingPresign(false);
       }
+    } else {
+      setLoadingPresign(false);
     }
 
     if (isTextContentType(obj.contentType) && obj.sizeBytes <= TEXT_PREVIEW_MAX_BYTES) {
@@ -72,13 +78,15 @@ export function useObjectInspector({ bucket, baseUrl, visibility }: UseObjectIns
 
   const close = () => {
     requestSeq.current++;
+    setLoadingPresign(false);
     setObject(null);
   };
 
   /** 以指定有效期重新签发预签名链接，返回新链接（失败返回空串并提示） */
   const refreshPresigned = async (ttl: number): Promise<string> => {
     setPresignTtl(ttl);
-    if (!object) return '';
+    if (!object || isPublic) return '';
+    setLoadingPresign(true);
     try {
       const res = await cosApi.presignUrl(bucket, {
         key: object.key,
@@ -90,6 +98,8 @@ export function useObjectInspector({ bucket, baseUrl, visibility }: UseObjectIns
     } catch (err: unknown) {
       message.error(getErrorMessage(err, '生成预签名链接失败'));
       return '';
+    } finally {
+      setLoadingPresign(false);
     }
   };
 
@@ -98,6 +108,7 @@ export function useObjectInspector({ bucket, baseUrl, visibility }: UseObjectIns
     rawUrl,
     presignedUrl,
     presignTtl,
+    loadingPresign,
     textPreview,
     open,
     close,

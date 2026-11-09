@@ -297,7 +297,7 @@ func (s *Server) handlePresignURL(w http.ResponseWriter, r *http.Request) {
 	bucketName := strings.ToLower(strings.TrimSpace(r.PathValue("bucket")))
 	var req struct {
 		Key          string `json:"key"`
-		Method       string `json:"method"`       // "GET" | "PUT"
+		Method       string `json:"method"`       // "GET" | "PUT" | "HEAD"
 		ExpiresInSec int64  `json:"expiresInSec"` // 默认 3600
 		Download     bool   `json:"download"`
 	}
@@ -308,10 +308,25 @@ func (s *Server) handlePresignURL(w http.ResponseWriter, r *http.Request) {
 	if req.Method == "" {
 		req.Method = "GET"
 	}
-	req.Method = strings.ToUpper(req.Method)
+	req.Method = strings.ToUpper(strings.TrimSpace(req.Method))
+	if req.Method != "GET" && req.Method != "PUT" && req.Method != "HEAD" {
+		writeJSONError(w, http.StatusBadRequest, "预签名仅支持 GET、HEAD 或 PUT 方法")
+		return
+	}
+
+	b, err := s.store.GetBucket(bucketName)
+	if err != nil {
+		writeJSONError(w, http.StatusNotFound, "存储桶不存在")
+		return
+	}
 
 	p, ok := s.requireBucketAccess(w, r, bucketName, req.Method == "PUT")
 	if !ok {
+		return
+	}
+
+	if b.Visibility == "public-read" && (req.Method == "GET" || req.Method == "HEAD") {
+		writeJSONError(w, http.StatusBadRequest, "公开只读桶的文件天然支持永久直链访问，无需签发 GET 临时分享链接（公开桶仅支持签发 PUT 临时上传链接）")
 		return
 	}
 
@@ -326,16 +341,14 @@ func (s *Server) handlePresignURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	queryStr, expUnix, err := s.auth.GeneratePresignedQuery(req.Method, bucketName, normKey, req.ExpiresInSec, akID)
+	isDownload := req.Download && req.Method != "PUT"
+	queryStr, expUnix, err := s.auth.GeneratePresignedQuery(req.Method, bucketName, normKey, req.ExpiresInSec, akID, isDownload)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	rawURL := s.buildObjectRawURL(r, bucketName, normKey) + "?" + queryStr
-	if req.Download {
-		rawURL += "&download=1"
-	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"url":       rawURL,

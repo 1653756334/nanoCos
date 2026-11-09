@@ -136,6 +136,34 @@ func TestAWSSigV4OfficialVectorsAndHelpers(t *testing.T) {
 	if _, ok := svc.VerifyPresignedQuery(req, "mybucket", "folder/other.txt"); ok {
 		t.Fatalf("预签名 URL 跨 Key 使用应当被拒绝")
 	}
+	// 篡改追加 download=1 或 response-content-disposition 必须被拒绝
+	reqTamperedDl := httptest.NewRequest("GET", "http://localhost:9000/raw/mybucket/folder/file.txt?"+qStr+"&download=1", nil)
+	if _, ok := svc.VerifyPresignedQuery(reqTamperedDl, "mybucket", "folder/file.txt"); ok {
+		t.Fatalf("未签名的 download=1 参数篡改应当被拒绝")
+	}
+	reqTamperedDisp := httptest.NewRequest("GET", "http://localhost:9000/raw/mybucket/folder/file.txt?"+qStr+"&response-content-disposition=attachment", nil)
+	if _, ok := svc.VerifyPresignedQuery(reqTamperedDisp, "mybucket", "folder/file.txt"); ok {
+		t.Fatalf("未签名的 response-content-disposition 参数篡改应当被拒绝")
+	}
+	// 合法签发带 download=true 的预签名应当验证通过
+	qStrDl, _, err := svc.GeneratePresignedQuery("GET", "mybucket", "folder/file.txt", 600, "ADMIN", true)
+	if err != nil {
+		t.Fatalf("GeneratePresignedQuery with download failed: %v", err)
+	}
+	reqValidDl := httptest.NewRequest("GET", "http://localhost:9000/raw/mybucket/folder/file.txt?"+qStrDl, nil)
+	if _, ok := svc.VerifyPresignedQuery(reqValidDl, "mybucket", "folder/file.txt"); !ok {
+		t.Fatalf("合法签发的 download=1 预签名应当验证通过")
+	}
+	// 管理员修改密码后，此前签发的 ADMIN 预签名链接应当自动失效
+	if _, _, _, err := st.EnsureAdminAccount("admin", "pass123456"); err != nil {
+		t.Fatalf("EnsureAdminAccount failed: %v", err)
+	}
+	if _, _, err := st.ResetAdminCredentials("admin", "newpass123456"); err != nil {
+		t.Fatalf("ResetAdminCredentials failed: %v", err)
+	}
+	if _, ok := svc.VerifyPresignedQuery(req, "mybucket", "folder/file.txt"); ok {
+		t.Fatalf("管理员修改密码后，旧的 ADMIN 预签名链接应当失效")
+	}
 
 	// 6. 测试登录防爆破上限驱逐逻辑
 	for i := 0; i < 4100; i++ {

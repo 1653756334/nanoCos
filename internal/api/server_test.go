@@ -964,5 +964,53 @@ func TestSecondRoundAuditFixes(t *testing.T) {
 		if revealResp.SecretKey != ak.SecretKey {
 			t.Fatalf("reveal 返回的 SecretKey 不匹配: got=%q want=%q", revealResp.SecretKey, ak.SecretKey)
 		}
+
+		// 验证预签名 URL 规则：
+		// 1) 公开只读桶拒绝签发 GET 预签名 (400)，但允许签发 PUT 预签名 (200)
+		doReqWithAK(http.MethodPost, "/api/v1/buckets", strings.NewReader(`{"name":"pub-presign-bkt","visibility":"public-read"}`), nil, ak)
+		pubGetPresign := doReqWithAK(http.MethodPost, "/api/v1/buckets/pub-presign-bkt/presign", strings.NewReader(`{"key":"hello.txt","method":"GET","expiresInSec":600}`), nil, ak)
+		if pubGetPresign.Code != http.StatusBadRequest {
+			t.Fatalf("公开只读桶签发 GET 预签名应当返回 400，实际返回 %d: %s", pubGetPresign.Code, pubGetPresign.Body.String())
+		}
+		pubPutPresign := doReqWithAK(http.MethodPost, "/api/v1/buckets/pub-presign-bkt/presign", strings.NewReader(`{"key":"hello.txt","method":"PUT","expiresInSec":600}`), nil, ak)
+		if pubPutPresign.Code != http.StatusOK {
+			t.Fatalf("公开只读桶签发 PUT 预签名应当返回 200，实际返回 %d: %s", pubPutPresign.Code, pubPutPresign.Body.String())
+		}
+
+		// 2) 不存在的存储桶或非法 Method 拒绝签发预签名
+		noBucketPresign := doReqWithAK(http.MethodPost, "/api/v1/buckets/non-existent-bkt/presign", strings.NewReader(`{"key":"a.txt","method":"GET"}`), nil, ak)
+		if noBucketPresign.Code != http.StatusNotFound {
+			t.Fatalf("不存在的存储桶签发预签名应返回 404，实际返回 %d", noBucketPresign.Code)
+		}
+		badMethodPresign := doReqWithAK(http.MethodPost, "/api/v1/buckets/list-bucket/presign", strings.NewReader(`{"key":"a.txt","method":"DELETE"}`), nil, ak)
+		if badMethodPresign.Code != http.StatusBadRequest {
+			t.Fatalf("非法 Method 签发预签名应返回 400，实际返回 %d", badMethodPresign.Code)
+		}
+
+		// 3) 私有桶签发带 download=true 的预签名校验与防篡改
+		_, _ = st.PutObjectFromStream("list-bucket", "secret-doc.txt", strings.NewReader("private-data"), "text/plain", nil)
+		privPresignRec := doReqWithAK(http.MethodPost, "/api/v1/buckets/list-bucket/presign", strings.NewReader(`{"key":"secret-doc.txt","method":"GET","expiresInSec":300,"download":true}`), nil, ak)
+		if privPresignRec.Code != http.StatusOK {
+			t.Fatalf("私有桶签发带 download 的预签名失败: %d %s", privPresignRec.Code, privPresignRec.Body.String())
+		}
+		var privPresignResp struct {
+			URL string `json:"url"`
+		}
+		_ = json.NewDecoder(privPresignRec.Body).Decode(&privPresignResp)
+		parsedPrivURL, err := url.Parse(privPresignResp.URL)
+		if err != nil {
+			t.Fatalf("解析私有桶预签名 URL 失败: %v", err)
+		}
+		dlGetRec := doReqWithAK(http.MethodGet, parsedPrivURL.RequestURI(), nil, nil, nil)
+		if dlGetRec.Code != http.StatusOK || !strings.HasPrefix(dlGetRec.Header().Get("Content-Disposition"), "attachment;") {
+			t.Fatalf("带 download=1 的预签名访问失败或未返回 attachment 头: code=%d disp=%q", dlGetRec.Code, dlGetRec.Header().Get("Content-Disposition"))
+		}
+		// 若外部访问者擅自删掉 URL 中的 &download=1，签名校验必须拒绝 (403)
+		tamperedURI := strings.ReplaceAll(parsedPrivURL.RequestURI(), "download=1&", "")
+		tamperedURI = strings.ReplaceAll(tamperedURI, "&download=1", "")
+		tamperedGetRec := doReqWithAK(http.MethodGet, tamperedURI, nil, nil, nil)
+		if tamperedGetRec.Code != http.StatusForbidden {
+			t.Fatalf("擅自移除 download=1 参数应当导致签名验证失败返回 403，实际返回 %d", tamperedGetRec.Code)
+		}
 	})
 }

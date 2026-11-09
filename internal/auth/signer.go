@@ -178,6 +178,16 @@ func (a *AuthService) CurrentAdminUsername() string {
 	return "admin"
 }
 
+// getTokenVersion 返回当前管理员账户的 tokenVersion（默认 1）
+func (a *AuthService) getTokenVersion() int64 {
+	if a.store != nil {
+		if acc, err := a.store.GetAdminAccount(); err == nil {
+			return acc.TokenVersion
+		}
+	}
+	return 1
+}
+
 // GenerateAdminToken 签发带随机 jti 与 tokenVersion 的管理员控制台会话令牌
 func (a *AuthService) GenerateAdminToken(ttl time.Duration) string {
 	exp := time.Now().Add(ttl).Unix()
@@ -186,10 +196,7 @@ func (a *AuthService) GenerateAdminToken(ttl time.Duration) string {
 	jti := hex.EncodeToString(nonce)
 
 	adminUser := a.CurrentAdminUsername()
-	var tokenVer int64 = 1
-	if acc, err := a.store.GetAdminAccount(); err == nil {
-		tokenVer = acc.TokenVersion
-	}
+	tokenVer := a.getTokenVersion()
 
 	payload := fmt.Sprintf("admin:%s:%d:%d:%s", adminUser, exp, tokenVer, jti)
 	sig := hmacSHA256Hex(a.cfg.SecretKey, payload)
@@ -275,7 +282,7 @@ func (a *AuthService) VerifyAdminToken(token string) bool {
 }
 
 // GeneratePresignedQuery 生成预签名 URL 查询参数串 (支持 GET 下载与 PUT 直传)
-func (a *AuthService) GeneratePresignedQuery(method, bucket, key string, expiresInSec int64, akID string) (string, int64, error) {
+func (a *AuthService) GeneratePresignedQuery(method, bucket, key string, expiresInSec int64, akID string, download ...bool) (string, int64, error) {
 	method = strings.ToUpper(strings.TrimSpace(method))
 	if method == "" {
 		method = "GET"
@@ -293,7 +300,7 @@ func (a *AuthService) GeneratePresignedQuery(method, bucket, key string, expires
 	}
 	exp := time.Now().Unix() + expiresInSec
 
-	secret := a.cfg.SecretKey
+	secret := fmt.Sprintf("%s:v%d", a.cfg.SecretKey, a.getTokenVersion())
 	if akID == "" {
 		akID = "ADMIN"
 	} else if akID != "ADMIN" {
@@ -304,11 +311,20 @@ func (a *AuthService) GeneratePresignedQuery(method, bucket, key string, expires
 		secret = ak.SecretKey
 	}
 
-	stringToSign := fmt.Sprintf("%s\n%s\n%s\n%d\n%s", method, bucket, key, exp, akID)
+	isDownload := len(download) > 0 && download[0]
+	dlFlag := "0"
+	if isDownload {
+		dlFlag = "1"
+	}
+
+	stringToSign := fmt.Sprintf("%s\n%s\n%s\n%d\n%s\n%s", method, bucket, key, exp, akID, dlFlag)
 	sig := hmacSHA256Hex(secret, stringToSign)
 
 	v := url.Values{}
 	v.Set("ak", akID)
+	if isDownload {
+		v.Set("download", "1")
+	}
 	v.Set("expires", strconv.FormatInt(exp, 10))
 	v.Set("method", method)
 	v.Set("sig", sig)
@@ -326,6 +342,11 @@ func (a *AuthService) VerifyPresignedQuery(r *http.Request, bucket, key string) 
 		if p := FromContext(r.Context()); p != nil {
 			return p, true
 		}
+		return nil, false
+	}
+
+	// 自定义预签名不允许附带未签名的 response-content-disposition 防止钓鱼文件名篡改
+	if q.Get("response-content-disposition") != "" {
 		return nil, false
 	}
 
@@ -352,7 +373,7 @@ func (a *AuthService) VerifyPresignedQuery(r *http.Request, bucket, key string) 
 	var secret string
 	var principal *Principal
 	if akID == "ADMIN" {
-		secret = a.cfg.SecretKey
+		secret = fmt.Sprintf("%s:v%d", a.cfg.SecretKey, a.getTokenVersion())
 		principal = &Principal{IsAdmin: true}
 	} else {
 		ak, err := a.store.GetAccessKey(akID)
@@ -363,7 +384,15 @@ func (a *AuthService) VerifyPresignedQuery(r *http.Request, bucket, key string) 
 		principal = &Principal{AccessKey: ak}
 	}
 
-	stringToSign := fmt.Sprintf("%s\n%s\n%s\n%d\n%s", signedMethod, bucket, normKey, exp, akID)
+	dlParam := q.Get("download")
+	dlFlag := "0"
+	if dlParam == "1" || dlParam == "true" {
+		dlFlag = "1"
+	} else if dlParam != "" && dlParam != "0" && dlParam != "false" {
+		return nil, false
+	}
+
+	stringToSign := fmt.Sprintf("%s\n%s\n%s\n%d\n%s\n%s", signedMethod, bucket, normKey, exp, akID, dlFlag)
 	expectedSig := hmacSHA256Hex(secret, stringToSign)
 	if !hmac.Equal([]byte(sig), []byte(expectedSig)) {
 		return nil, false
