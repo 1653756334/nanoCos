@@ -8,9 +8,12 @@ Type=simple
 User=nanocos
 Group=nanocos
 WorkingDirectory=/var/lib/nanocos
-# 可在 /etc/nanocos/nanocos.env (权限 0600) 中配置 NANOCOS_PUBLIC_URL 等环境变量，切勿在命令行参数中硬编码密码
+# 默认运行参数通过环境变量提供，可在 /etc/nanocos/nanocos.env (权限 0600) 中按需覆盖
+Environment="NANOCOS_ADDR=:9000"
+Environment="NANOCOS_DATA_DIR=/var/lib/nanocos/data"
+Environment="NANOCOS_LOG_FORMAT=json"
 EnvironmentFile=-/etc/nanocos/nanocos.env
-ExecStart=/usr/local/bin/cosd -addr :9000 -data-dir /var/lib/nanocos/data -log-format json
+ExecStart=/usr/local/bin/cosd
 Restart=on-failure
 RestartSec=5s
 LimitNOFILE=65536

@@ -1,4 +1,4 @@
-import { Button, Card, Popconfirm, Space, Table, Tag, Typography, message } from 'antd';
+import { Button, Card, Popconfirm, Space, Table, Tag, Typography } from 'antd';
 import type { TableColumnsType } from 'antd';
 import {
   CopyOutlined,
@@ -9,7 +9,7 @@ import {
   SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import type { AccessKeyItem } from '../../../lib/api';
-import { copyToClipboard, formatDate } from '../../../lib/utils';
+import { formatDate } from '../../../lib/utils';
 
 const { Text } = Typography;
 
@@ -18,7 +18,12 @@ interface AccessKeysTableProps {
   loading: boolean;
   /** 以 AccessKey 为键，记录 SecretKey 是否已展开 */
   revealedSK: Record<string, boolean>;
+  /** 按需拉取缓存的明文 SecretKey */
+  secretMap: Record<string, string>;
+  /** 正在请求明文的加载状态 */
+  revealingMap: Record<string, boolean>;
   onToggleReveal: (accessKey: string) => void;
+  onCopySecret: (accessKey: string) => void;
   onDelete: (accessKey: string) => Promise<void>;
 }
 
@@ -27,7 +32,10 @@ export function AccessKeysTable({
   keys,
   loading,
   revealedSK,
+  secretMap,
+  revealingMap,
   onToggleReveal,
+  onCopySecret,
   onDelete,
 }: AccessKeysTableProps) {
   const columns: TableColumnsType<AccessKeyItem> = [
@@ -56,16 +64,19 @@ export function AccessKeysTable({
       title: 'SecretKey (SK)',
       dataIndex: 'secretKey',
       key: 'secretKey',
-      render: (sk: string, record) => {
+      render: (_sk: string, record) => {
         const revealed = !!revealedSK[record.accessKey];
+        const plainSK = secretMap[record.accessKey] || record.secretKey;
+        const isRevealing = !!revealingMap[record.accessKey];
         return (
           <Space size={6}>
             <code className="text-xs font-mono bg-slate-100 px-2 py-0.5 rounded text-slate-700">
-              {revealed ? sk : '••••••••••••••••••••••••'}
+              {revealed && plainSK ? plainSK : '••••••••••••••••••••••••'}
             </code>
             <Button
               type="text"
               size="small"
+              loading={isRevealing}
               aria-label={revealed ? '隐藏 SecretKey' : '显示 SecretKey'}
               icon={revealed ? <EyeInvisibleOutlined /> : <EyeOutlined />}
               onClick={() => onToggleReveal(record.accessKey)}
@@ -73,12 +84,10 @@ export function AccessKeysTable({
             <Button
               type="text"
               size="small"
+              loading={isRevealing}
               aria-label="复制 SecretKey"
               icon={<CopyOutlined />}
-              onClick={async () => {
-                await copyToClipboard(sk);
-                message.success('SecretKey 已复制');
-              }}
+              onClick={() => onCopySecret(record.accessKey)}
             />
           </Space>
         );

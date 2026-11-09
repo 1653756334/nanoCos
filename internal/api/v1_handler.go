@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"path"
 	"strings"
 	"time"
 
@@ -57,18 +56,13 @@ func (s *Server) requireBucketAccess(w http.ResponseWriter, r *http.Request, buc
 	return nil, false
 }
 
-// extractClientIP 提取客户端真实 IP。默认使用底层 TCP 连接的 RemoteAddr，仅当开启 TrustProxy 或对端为本机回环反向代理时才信任 X-Forwarded-For / X-Real-IP，彻底杜绝伪造 XFF 绕过登录限流。
+// extractClientIP 提取客户端真实 IP。默认使用底层 TCP 连接的 RemoteAddr，仅当显式开启 TrustProxy 时才信任 X-Forwarded-For / X-Real-IP，彻底杜绝伪造 XFF 绕过登录限流。
 func (s *Server) extractClientIP(r *http.Request) string {
 	remoteHost := strings.TrimSpace(r.RemoteAddr)
 	if h, _, err := net.SplitHostPort(remoteHost); err == nil && h != "" {
 		remoteHost = h
 	}
 	trustHeaders := s.cfg != nil && s.cfg.TrustProxy
-	if !trustHeaders {
-		if ip := net.ParseIP(remoteHost); ip != nil && ip.IsLoopback() {
-			trustHeaders = true
-		}
-	}
 	if trustHeaders {
 		if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
 			parts := strings.Split(xff, ",")
@@ -206,11 +200,16 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusUnauthorized, "未登录或凭证已过期")
 		return
 	}
+	ver := "v1.1.0"
+	if s.cfg != nil && s.cfg.Version != "" {
+		ver = s.cfg.Version
+	}
 	baseURL := s.resolveBaseURL(r)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"authenticated": true,
 		"isAdmin":       p.IsAdmin,
 		"username":      s.auth.CurrentAdminUsername(),
+		"version":       ver,
 		"baseUrl":       baseURL,
 		"s3Endpoint":    baseURL + "/s3",
 		"s3Region":      s.cfg.S3Region,
@@ -254,9 +253,14 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		stats.TopObjects = filteredTop
 	}
 
+	ver := "v1.1.0"
+	if s.cfg != nil && s.cfg.Version != "" {
+		ver = s.cfg.Version
+	}
 	baseURL := s.resolveBaseURL(r)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"stats":      stats,
+		"version":    ver,
 		"baseUrl":    baseURL,
 		"s3Endpoint": baseURL + "/s3",
 		"s3Region":   s.cfg.S3Region,
@@ -358,7 +362,7 @@ func (s *Server) handleDeleteBucket(w http.ResponseWriter, r *http.Request) {
 
 // --- AccessKey 密钥管理控制器 ---
 
-// handleListAccessKeys GET /api/v1/access-keys
+// handleListAccessKeys GET /api/v1/access-keys（列表默认对 SecretKey 脱敏，按需通过 reveal 接口获取明文）
 func (s *Server) handleListAccessKeys(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	if p == nil || !p.IsAdmin {
@@ -370,7 +374,29 @@ func (s *Server) handleListAccessKeys(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	for i := range keys {
+		keys[i].SecretKey = ""
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"accessKeys": keys})
+}
+
+// handleRevealAccessKey POST /api/v1/access-keys/{ak}/reveal 按需获取指定 AccessKey 的明文 SecretKey
+func (s *Server) handleRevealAccessKey(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	if p == nil || !p.IsAdmin {
+		writeJSONError(w, http.StatusForbidden, "仅管理员可查看 SecretKey")
+		return
+	}
+	ak := r.PathValue("ak")
+	item, err := s.store.GetAccessKey(ak)
+	if err != nil {
+		writeJSONError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"accessKey": item.AccessKey,
+		"secretKey": item.SecretKey,
+	})
 }
 
 // handleCreateAccessKey POST /api/v1/access-keys
@@ -432,11 +458,11 @@ func (s *Server) resolveBaseURL(r *http.Request) string {
 
 func (s *Server) buildObjectRawURL(r *http.Request, bucket, key string) string {
 	base := s.resolveBaseURL(r)
-	parts := strings.Split(key, "/")
+	parts := strings.Split(strings.TrimLeft(key, "/"), "/")
 	for i, p := range parts {
 		parts[i] = url.PathEscape(p)
 	}
-	return fmt.Sprintf("%s/raw/%s/%s", base, url.PathEscape(strings.ToLower(bucket)), path.Join(parts...))
+	return fmt.Sprintf("%s/raw/%s/%s", base, url.PathEscape(strings.ToLower(bucket)), strings.Join(parts, "/"))
 }
 
 func extractCustomMetaHeaders(h http.Header) map[string]string {

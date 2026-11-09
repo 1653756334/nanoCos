@@ -16,6 +16,7 @@ interface SidebarContentProps {
   collapsed: boolean;
   buckets: Bucket[];
   stats: SystemStats | null;
+  version?: string;
 }
 
 const NAV_ITEMS = [
@@ -31,7 +32,7 @@ function resolveActiveNav(pathname: string): string {
   return routes.dashboard;
 }
 
-export function SidebarContent({ collapsed, buckets, stats }: SidebarContentProps) {
+export function SidebarContent({ collapsed, buckets, stats, version = 'v1.1.0' }: SidebarContentProps) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const bucketMatch = useMatch('/buckets/:bucket');
@@ -52,7 +53,7 @@ export function SidebarContent({ collapsed, buckets, stats }: SidebarContentProp
                   NanoCOS
                 </span>
                 <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
-                  v1.0
+                  {version}
                 </span>
               </div>
             )}

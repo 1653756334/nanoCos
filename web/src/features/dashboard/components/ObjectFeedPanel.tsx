@@ -9,10 +9,11 @@ import type { FeedMode } from '../types';
 interface ObjectFeedPanelProps {
   stats: SystemStats | null;
   onOpenBucket: (bucketName: string) => void;
+  onOpenObject?: (bucketName: string, key: string) => void;
 }
 
 /** 右侧：Top 大文件容量排行 & 最近上传动态流 (5 列) */
-export function ObjectFeedPanel({ stats, onOpenBucket }: ObjectFeedPanelProps) {
+export function ObjectFeedPanel({ stats, onOpenBucket, onOpenObject }: ObjectFeedPanelProps) {
   const [feedMode, setFeedMode] = useState<FeedMode>('top');
   const feedItems = feedMode === 'top' ? stats?.topObjects || [] : stats?.recentObjects || [];
 
@@ -54,7 +55,9 @@ export function ObjectFeedPanel({ stats, onOpenBucket }: ObjectFeedPanelProps) {
                 return (
                   <div
                     key={`${obj.bucket}-${obj.key}`}
-                    onClick={() => onOpenBucket(obj.bucket)}
+                    onClick={() =>
+                      onOpenObject ? onOpenObject(obj.bucket, obj.key) : onOpenBucket(obj.bucket)
+                    }
                     className="group cursor-pointer p-2.5 rounded bg-slate-50/80 hover:bg-blue-50/50 border border-slate-200/70 hover:border-blue-200 transition-colors"
                   >
                     <div className="flex items-center justify-between gap-2 text-xs">

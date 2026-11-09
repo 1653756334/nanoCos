@@ -1,11 +1,13 @@
 import { Form, Input, Modal, Select } from 'antd';
 import type { FormInstance } from 'antd';
+import type { Bucket } from '../../../lib/api';
 import type { CreateKeyFormValues } from '../types';
 
 interface CreateKeyModalProps {
   open: boolean;
   submitting: boolean;
   form: FormInstance<CreateKeyFormValues>;
+  buckets: Bucket[];
   onCancel: () => void;
   onSubmit: () => void;
 }
@@ -15,9 +17,34 @@ export function CreateKeyModal({
   open,
   submitting,
   form,
+  buckets,
   onCancel,
   onSubmit,
 }: CreateKeyModalProps) {
+  const bucketOptions = [
+    { value: '*', label: '* (全部存储桶)' },
+    ...buckets.map((b) => ({
+      value: b.name,
+      label: `${b.name} (${b.visibility === 'public-read' ? '公开读' : '私有'})`,
+    })),
+  ];
+
+  const handleBucketsChange = (vals: string[]) => {
+    if (vals.length === 0) {
+      form.setFieldValue('allowedBuckets', ['*']);
+      return;
+    }
+    const last = vals[vals.length - 1];
+    if (last === '*') {
+      form.setFieldValue('allowedBuckets', ['*']);
+    } else {
+      form.setFieldValue(
+        'allowedBuckets',
+        vals.filter((v) => v !== '*')
+      );
+    }
+  };
+
   return (
     <Modal
       title="签发新 API 访问密钥 (Create AccessKey)"
@@ -41,10 +68,15 @@ export function CreateKeyModal({
         <Form.Item
           label="允许访问的存储桶范围"
           name="allowedBuckets"
-          extra="填 * 表示允许访问所有存储桶；若限制特定桶请用英文逗号分隔，如 assets,images"
-          rules={[{ required: true, message: '请输入授权存储桶范围' }]}
+          extra="可选择 *（允许访问全部存储桶）或勾选指定的一个或多个存储桶"
+          rules={[{ required: true, message: '请选择授权存储桶范围' }]}
         >
-          <Input className="font-mono" placeholder="*" />
+          <Select
+            mode="tags"
+            options={bucketOptions}
+            onChange={handleBucketsChange}
+            placeholder="选择 * 或指定的存储桶"
+          />
         </Form.Item>
 
         <Form.Item label="权限级别" name="permission">

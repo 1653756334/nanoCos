@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"path/filepath"
@@ -536,14 +537,29 @@ func (s *Store) CopyObject(srcBucket, srcKey, dstBucket, dstKey string) (*Object
 		return nil, err
 	}
 
-	// 若源对象为文件夹，递归零拷贝复制其下所有子文件夹与文件对象（复制前预检目标桶总配额，防止半途失败）
+	// 若源对象为文件夹，在单个写事务内递归零拷贝复制其下所有子文件夹与文件对象
 	if srcObj.IsFolder {
 		dstFolderKey, err := NormalizeObjectKey(dstKey, true)
 		if err != nil {
 			return nil, err
 		}
-		dstB, err := s.GetBucket(dstBucket)
-		if err != nil {
+		if srcBucket == dstBucket {
+			if dstFolderKey == srcObj.Key {
+				return srcObj, nil
+			}
+			if strings.HasPrefix(dstFolderKey, srcObj.Key) {
+				return nil, fmt.Errorf("%w: 不能将文件夹复制或移动到其自身子目录中", ErrInvalidKey)
+			}
+		}
+
+		s.writeMu.Lock()
+		defer s.writeMu.Unlock()
+
+		var quotaBytes, usedBytes int64
+		if err := s.db.QueryRow(`SELECT quota_bytes, used_bytes FROM buckets WHERE name = ?`, dstBucket).Scan(&quotaBytes, &usedBytes); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, ErrBucketNotFound
+			}
 			return nil, err
 		}
 
@@ -568,45 +584,150 @@ func (s *Store) CopyObject(srcBucket, srcKey, dstBucket, dstKey string) (*Object
 			return nil, err
 		}
 		var children []*Object
-		var totalCopyBytes int64
 		for rows.Next() {
-			if child, scanErr := scanObjectRow(rows); scanErr == nil {
-				children = append(children, child)
-				if !child.IsFolder {
-					totalCopyBytes += child.SizeBytes
-				}
+			child, scanErr := scanObjectRow(rows)
+			if scanErr != nil {
+				_ = rows.Close()
+				return nil, scanErr
 			}
+			children = append(children, child)
 		}
-		_ = rows.Close()
-
-		if dstB.QuotaBytes > 0 && dstB.UsedBytes+totalCopyBytes > dstB.QuotaBytes {
-			return nil, ErrQuotaExceeded
+		if err := rows.Close(); err != nil {
+			return nil, err
 		}
 
-		rootFolder, err := s.CreateFolder(dstBucket, dstFolderKey)
+		tx, err := s.db.Begin()
 		if err != nil {
 			return nil, err
 		}
+		defer func() { _ = tx.Rollback() }()
+
+		now := time.Now().UTC()
+		if err := ensureAncestorFoldersTx(tx, dstBucket, dstFolderKey, now); err != nil {
+			return nil, err
+		}
+		rootParentDir, _ := ExtractParentAndName(dstFolderKey)
+		if _, err := tx.Exec(`
+			INSERT INTO objects (bucket, key, parent_dir, is_folder, blob_sha256, size_bytes, content_type, etag, custom_meta, updated_at)
+			VALUES (?, ?, ?, 1, NULL, 0, 'application/x-directory', '', '{}', ?)
+			ON CONFLICT(bucket, key) DO UPDATE SET
+				updated_at = excluded.updated_at
+			WHERE objects.is_folder = 1
+		`, dstBucket, dstFolderKey, rootParentDir, now); err != nil {
+			return nil, err
+		}
+
+		var deltaCount int64
+		var deltaBytes int64
+		var zeroRefBlobs []string
 
 		for _, child := range children {
 			relPath := strings.TrimPrefix(child.Key, srcObj.Key)
 			targetChildKey := dstFolderKey + relPath
 			if child.IsFolder {
-				if _, err := s.CreateFolder(dstBucket, targetChildKey); err != nil {
+				if err := ensureAncestorFoldersTx(tx, dstBucket, targetChildKey, now); err != nil {
 					return nil, err
 				}
-			} else {
-				if _, err := s.SaveBlobObject(dstBucket, targetChildKey, child.BlobSHA256, child.ETag, child.SizeBytes, child.ContentType, child.CustomMeta); err != nil {
+				childParent, _ := ExtractParentAndName(targetChildKey)
+				if _, err := tx.Exec(`
+					INSERT INTO objects (bucket, key, parent_dir, is_folder, blob_sha256, size_bytes, content_type, etag, custom_meta, updated_at)
+					VALUES (?, ?, ?, 1, NULL, 0, 'application/x-directory', '', '{}', ?)
+					ON CONFLICT(bucket, key) DO UPDATE SET
+						updated_at = excluded.updated_at
+					WHERE objects.is_folder = 1
+				`, dstBucket, targetChildKey, childParent, now); err != nil {
 					return nil, err
+				}
+				continue
+			}
+
+			var oldSHA sql.NullString
+			var oldSize int64
+			var oldIsFolder int
+			qErr := tx.QueryRow(`SELECT blob_sha256, size_bytes, is_folder FROM objects WHERE bucket = ? AND key = ?`, dstBucket, targetChildKey).Scan(&oldSHA, &oldSize, &oldIsFolder)
+			if qErr != nil && !errors.Is(qErr, sql.ErrNoRows) {
+				return nil, qErr
+			}
+			existedFile := qErr == nil && oldIsFolder == 0
+
+			if !existedFile {
+				deltaCount++
+			}
+			deltaBytes += child.SizeBytes - oldSize
+			if quotaBytes > 0 && usedBytes+deltaBytes > quotaBytes {
+				return nil, ErrQuotaExceeded
+			}
+
+			if !existedFile || oldSHA.String != child.BlobSHA256 {
+				if _, err := tx.Exec(`UPDATE blobs SET ref_count = ref_count + 1 WHERE sha256 = ?`, child.BlobSHA256); err != nil {
+					return nil, err
+				}
+				if existedFile && oldSHA.Valid && oldSHA.String != "" {
+					if _, err := tx.Exec(`UPDATE blobs SET ref_count = ref_count - 1 WHERE sha256 = ?`, oldSHA.String); err != nil {
+						return nil, err
+					}
+					var rem int64
+					if err := tx.QueryRow(`SELECT ref_count FROM blobs WHERE sha256 = ?`, oldSHA.String).Scan(&rem); err == nil && rem <= 0 {
+						_, _ = tx.Exec(`DELETE FROM blobs WHERE sha256 = ?`, oldSHA.String)
+						zeroRefBlobs = append(zeroRefBlobs, oldSHA.String)
+					}
 				}
 			}
+
+			if err := ensureAncestorFoldersTx(tx, dstBucket, targetChildKey, now); err != nil {
+				return nil, err
+			}
+			childParent, _ := ExtractParentAndName(targetChildKey)
+			metaJSON := "{}"
+			if len(child.CustomMeta) > 0 {
+				if bData, mErr := json.Marshal(child.CustomMeta); mErr == nil {
+					metaJSON = string(bData)
+				}
+			}
+			if _, err := tx.Exec(`
+				INSERT INTO objects (bucket, key, parent_dir, is_folder, blob_sha256, size_bytes, content_type, etag, custom_meta, updated_at)
+				VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT(bucket, key) DO UPDATE SET
+					parent_dir   = excluded.parent_dir,
+					is_folder    = 0,
+					blob_sha256  = excluded.blob_sha256,
+					size_bytes   = excluded.size_bytes,
+					content_type = excluded.content_type,
+					etag         = excluded.etag,
+					custom_meta  = excluded.custom_meta,
+					updated_at   = excluded.updated_at
+			`, dstBucket, targetChildKey, childParent, child.BlobSHA256, child.SizeBytes, child.ContentType, child.ETag, metaJSON, now); err != nil {
+				return nil, err
+			}
 		}
-		return rootFolder, nil
+
+		if deltaCount != 0 || deltaBytes != 0 {
+			if _, err := tx.Exec(`
+				UPDATE buckets
+				SET object_count = MAX(0, object_count + ?),
+				    used_bytes   = MAX(0, used_bytes + ?)
+				WHERE name = ?
+			`, deltaCount, deltaBytes, dstBucket); err != nil {
+				return nil, err
+			}
+		}
+
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+
+		for _, sha := range zeroRefBlobs {
+			_ = s.cas.DeleteBlob(sha)
+		}
+		return s.GetObject(dstBucket, dstFolderKey)
 	}
 
 	normDstKey, err := NormalizeObjectKey(dstKey, false)
 	if err != nil {
 		return nil, err
+	}
+	if srcBucket == dstBucket && normDstKey == srcObj.Key {
+		return srcObj, nil
 	}
 	return s.SaveBlobObject(dstBucket, normDstKey, srcObj.BlobSHA256, srcObj.ETag, srcObj.SizeBytes, srcObj.ContentType, srcObj.CustomMeta)
 }

@@ -35,6 +35,7 @@ export function useBuckets() {
 }
 
 export interface SystemInfo {
+  version: string;
   baseUrl: string;
   s3Endpoint: string;
   s3Region: string;
@@ -46,6 +47,7 @@ export function useSystemInfo(): SystemInfo {
   const { data: me } = useMe();
   const origin = window.location.origin;
   return {
+    version: stats?.version || me?.version || 'v1.1.0',
     baseUrl: stats?.baseUrl || me?.baseUrl || origin,
     s3Endpoint: stats?.s3Endpoint || me?.s3Endpoint || `${origin}/s3`,
     s3Region: stats?.s3Region || me?.s3Region || 'us-east-1',

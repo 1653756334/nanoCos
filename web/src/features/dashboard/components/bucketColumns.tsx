@@ -16,7 +16,8 @@ interface BucketColumnsOptions {
   logicalBytes?: number;
   onOpenBucket: (bucketName: string) => void;
   onEdit: (bucket: Bucket) => void;
-  onDelete: (name: string) => void;
+  onDeleteEmpty: (name: string) => void;
+  onRequestForceDelete: (bucket: Bucket) => void;
 }
 
 /** 存储桶管理表的列定义 */
@@ -24,7 +25,8 @@ export function createBucketColumns({
   logicalBytes,
   onOpenBucket,
   onEdit,
-  onDelete,
+  onDeleteEmpty,
+  onRequestForceDelete,
 }: BucketColumnsOptions): TableColumnsType<Bucket> {
   return [
     {
@@ -121,22 +123,35 @@ export function createBucketColumns({
               onClick={() => onEdit(record)}
             />
           </Tooltip>
-          <Popconfirm
-            title={`确定删除存储桶 "${record.name}"？`}
-            description="将清空桶内所有文件并回收无引用物理块。"
-            okText="删除"
-            cancelText="取消"
-            okButtonProps={{ danger: true }}
-            onConfirm={() => onDelete(record.name)}
-          >
-            <Button
-              type="text"
-              size="small"
-              danger
-              aria-label={`删除存储桶 ${record.name}`}
-              icon={<DeleteOutlined />}
-            />
-          </Popconfirm>
+          {record.objectCount > 0 ? (
+            <Tooltip title="删除非空存储桶（需输入桶名确认）">
+              <Button
+                type="text"
+                size="small"
+                danger
+                aria-label={`删除存储桶 ${record.name}`}
+                icon={<DeleteOutlined />}
+                onClick={() => onRequestForceDelete(record)}
+              />
+            </Tooltip>
+          ) : (
+            <Popconfirm
+              title={`确定删除空存储桶 "${record.name}"？`}
+              description="该存储桶当前为空，删除后不可恢复。"
+              okText="删除"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+              onConfirm={() => onDeleteEmpty(record.name)}
+            >
+              <Button
+                type="text"
+                size="small"
+                danger
+                aria-label={`删除存储桶 ${record.name}`}
+                icon={<DeleteOutlined />}
+              />
+            </Popconfirm>
+          )}
         </Space>
       ),
     },

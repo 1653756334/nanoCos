@@ -25,8 +25,10 @@ func (s *Server) handleBrowseObjects(w http.ResponseWriter, r *http.Request) {
 	search := q.Get("search")
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	offset, _ := strconv.Atoi(q.Get("offset"))
+	sortBy := q.Get("sortBy")
+	sortOrder := q.Get("sortOrder")
 
-	listing, err := s.store.BrowseDirectory(bucketName, prefix, search, limit, offset)
+	listing, err := s.store.BrowseDirectorySorted(bucketName, prefix, search, limit, offset, sortBy, sortOrder)
 	if err != nil {
 		writeUploadStoreErrorJSON(w, err)
 		return
@@ -249,8 +251,12 @@ func (s *Server) handleCopyObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.DeleteSource && (!strings.EqualFold(srcBucket, req.DstBucket) || req.SrcKey != req.DstKey) {
-		_, _ = s.store.DeleteObject(srcBucket, req.SrcKey)
+	normSrcKey, _ := store.NormalizeObjectKey(req.SrcKey, obj.IsFolder)
+	if req.DeleteSource && (!strings.EqualFold(srcBucket, req.DstBucket) || normSrcKey != obj.Key) {
+		if _, delErr := s.store.DeleteObject(srcBucket, normSrcKey); delErr != nil {
+			writeUploadStoreErrorJSON(w, delErr)
+			return
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -314,13 +320,19 @@ func (s *Server) handlePresignURL(w http.ResponseWriter, r *http.Request) {
 		akID = p.AccessKey.AccessKey
 	}
 
-	queryStr, expUnix, err := s.auth.GeneratePresignedQuery(req.Method, bucketName, req.Key, req.ExpiresInSec, akID)
+	normKey, err := store.NormalizeObjectKey(req.Key, false)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	rawURL := s.buildObjectRawURL(r, bucketName, req.Key) + "?" + queryStr
+	queryStr, expUnix, err := s.auth.GeneratePresignedQuery(req.Method, bucketName, normKey, req.ExpiresInSec, akID)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	rawURL := s.buildObjectRawURL(r, bucketName, normKey) + "?" + queryStr
 	if req.Download {
 		rawURL += "&download=1"
 	}

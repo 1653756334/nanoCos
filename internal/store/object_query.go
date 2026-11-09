@@ -49,8 +49,29 @@ func escapeLikePattern(s string) string {
 	return s
 }
 
-// BrowseDirectory 供 Web 控制台按目录层级或关键字高速浏览对象
+func buildBrowseOrderClause(sortBy, sortOrder string) string {
+	dir := "ASC"
+	switch strings.ToLower(strings.TrimSpace(sortOrder)) {
+	case "desc", "descend":
+		dir = "DESC"
+	}
+	switch strings.ToLower(strings.TrimSpace(sortBy)) {
+	case "size", "sizebytes", "size_bytes":
+		return "is_folder DESC, size_bytes " + dir + ", key ASC"
+	case "updatedat", "updated_at":
+		return "is_folder DESC, updated_at " + dir + ", key ASC"
+	default:
+		return "is_folder DESC, key " + dir
+	}
+}
+
+// BrowseDirectory 供 Web 控制台按目录层级或关键字高速浏览对象（默认按名称升序）
 func (s *Store) BrowseDirectory(bucket, prefix, search string, limit, offset int) (*DirectoryListing, error) {
+	return s.BrowseDirectorySorted(bucket, prefix, search, limit, offset, "key", "asc")
+}
+
+// BrowseDirectorySorted 供 Web 控制台按目录层级、关键字及指定字段排序高速浏览对象
+func (s *Store) BrowseDirectorySorted(bucket, prefix, search string, limit, offset int, sortBy, sortOrder string) (*DirectoryListing, error) {
 	bucket = strings.ToLower(strings.TrimSpace(bucket))
 	if _, err := s.GetBucket(bucket); err != nil {
 		return nil, err
@@ -69,6 +90,7 @@ func (s *Store) BrowseDirectory(bucket, prefix, search string, limit, offset int
 		offset = 0
 	}
 
+	orderClause := buildBrowseOrderClause(sortBy, sortOrder)
 	search = strings.TrimSpace(search)
 	var total int64
 	var rows *sql.Rows
@@ -87,7 +109,7 @@ func (s *Store) BrowseDirectory(bucket, prefix, search string, limit, offset int
 				SELECT id, bucket, key, parent_dir, is_folder, COALESCE(blob_sha256, ''), size_bytes, content_type, etag, custom_meta, updated_at
 				FROM objects
 				WHERE bucket = ? AND key LIKE ? ESCAPE '\'
-				ORDER BY is_folder DESC, key ASC
+				ORDER BY `+orderClause+`
 				LIMIT ? OFFSET ?
 			`, bucket, likePattern, limit, offset)
 		} else {
@@ -101,7 +123,7 @@ func (s *Store) BrowseDirectory(bucket, prefix, search string, limit, offset int
 				SELECT id, bucket, key, parent_dir, is_folder, COALESCE(blob_sha256, ''), size_bytes, content_type, etag, custom_meta, updated_at
 				FROM objects
 				WHERE bucket = ? AND substr(key, 1, length(?)) = ? AND key LIKE ? ESCAPE '\'
-				ORDER BY is_folder DESC, key ASC
+				ORDER BY `+orderClause+`
 				LIMIT ? OFFSET ?
 			`, bucket, prefix, prefix, likePattern, limit, offset)
 		}
@@ -116,7 +138,7 @@ func (s *Store) BrowseDirectory(bucket, prefix, search string, limit, offset int
 			SELECT id, bucket, key, parent_dir, is_folder, COALESCE(blob_sha256, ''), size_bytes, content_type, etag, custom_meta, updated_at
 			FROM objects
 			WHERE bucket = ? AND parent_dir = ?
-			ORDER BY is_folder DESC, key ASC
+			ORDER BY `+orderClause+`
 			LIMIT ? OFFSET ?
 		`, bucket, prefix, limit, offset)
 	}

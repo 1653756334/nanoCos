@@ -1,7 +1,7 @@
 /** 签发新密钥表单的字段 */
 export interface CreateKeyFormValues {
   name: string;
-  allowedBuckets: string;
+  allowedBuckets: string | string[];
   permission: 'read' | 'readwrite' | 'admin';
 }
 

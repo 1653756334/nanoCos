@@ -90,6 +90,7 @@ func (s *Server) Handler() http.Handler {
 	// Access Keys & Maintenance
 	mux.HandleFunc("GET /api/v1/access-keys", s.handleListAccessKeys)
 	mux.HandleFunc("POST /api/v1/access-keys", s.handleCreateAccessKey)
+	mux.HandleFunc("POST /api/v1/access-keys/{ak}/reveal", s.handleRevealAccessKey)
 	mux.HandleFunc("DELETE /api/v1/access-keys/{ak}", s.handleDeleteAccessKey)
 	mux.HandleFunc("POST /api/v1/admin/scrub", s.handleAdminScrub)
 	mux.HandleFunc("POST /api/v1/admin/gc", s.handleAdminGC)
@@ -149,7 +150,7 @@ func (s *Server) Handler() http.Handler {
 			if _, statErr := fs.Stat(distFS, "index.html"); statErr != nil {
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte("<!DOCTYPE html><html><head><title>NanoCOS</title></head><body><div id=\"root\">NanoCOS Console (build web assets with pnpm run build)</div></body></html>"))
+				_, _ = w.Write([]byte("<!DOCTYPE html><html><head><title>NanoCOS</title></head><body><div id=\"root\"></div><!-- NanoCOS Console (build web assets with pnpm run build) --></body></html>"))
 				return
 			}
 		}

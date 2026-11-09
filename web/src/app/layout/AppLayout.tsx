@@ -11,7 +11,7 @@ const { Sider, Content } = Layout;
 export function AppLayout() {
   const [collapsed, setCollapsed] = useState(false);
   const { data: me } = useMe();
-  const { stats, buckets, s3Endpoint } = useSystemOverview();
+  const { stats, buckets, s3Endpoint, version } = useSystemOverview();
 
   return (
     <Layout className="min-h-screen">
@@ -24,7 +24,7 @@ export function AppLayout() {
         trigger={null}
         className="border-r border-slate-200 select-none"
       >
-        <SidebarContent collapsed={collapsed} buckets={buckets} stats={stats} />
+        <SidebarContent collapsed={collapsed} buckets={buckets} stats={stats} version={version} />
       </Sider>
 
       <Layout>

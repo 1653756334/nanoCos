@@ -908,5 +908,61 @@ func TestSecondRoundAuditFixes(t *testing.T) {
 		if bkRec.Code != http.StatusOK {
 			t.Fatalf("POST /api/v1/admin/backup 失败: %d %s", bkRec.Code, bkRec.Body.String())
 		}
+
+		// 验证同桶未规范化路径重命名不会误删自身 (srcKey="a.txt", dstKey="/a.txt", deleteSource=true)
+		_, _ = st.PutObjectFromStream("list-bucket", "self-keep.txt", strings.NewReader("important"), "text/plain", nil)
+		selfMoveRec := doReqWithAK(http.MethodPost, "/api/v1/buckets/list-bucket/copy", strings.NewReader(`{"srcKey":"self-keep.txt","dstBucket":"list-bucket","dstKey":"/self-keep.txt","deleteSource":true}`), map[string]string{
+			"Content-Type": "application/json",
+		}, ak)
+		if selfMoveRec.Code != http.StatusOK {
+			t.Fatalf("同路径重命名应返回 200，实际 %d: %s", selfMoveRec.Code, selfMoveRec.Body.String())
+		}
+		if _, err := st.GetObject("list-bucket", "self-keep.txt"); err != nil {
+			t.Fatalf("同路径重命名不应误删文件自身: %v", err)
+		}
+
+		// 验证禁止将文件夹复制/移动到其自身子目录中
+		_, _ = st.CreateFolder("list-bucket", "parent-dir/")
+		subMoveRec := doReqWithAK(http.MethodPost, "/api/v1/buckets/list-bucket/copy", strings.NewReader(`{"srcKey":"parent-dir/","dstBucket":"list-bucket","dstKey":"parent-dir/sub/","deleteSource":true}`), map[string]string{
+			"Content-Type": "application/json",
+		}, ak)
+		if subMoveRec.Code != http.StatusBadRequest {
+			t.Fatalf("将文件夹移入自身子目录应返回 400，实际 %d: %s", subMoveRec.Code, subMoveRec.Body.String())
+		}
+
+		// 验证 AccessKey 列表默认脱敏 SecretKey，且可通过 /reveal 按需获取明文
+		loginRec := doReqWithAK(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":"admin","password":"secretpass"}`), nil, nil)
+		var loginData struct {
+			Token string `json:"token"`
+		}
+		_ = json.NewDecoder(loginRec.Body).Decode(&loginData)
+		adminHdr := map[string]string{"Authorization": "Bearer " + loginData.Token}
+
+		akListRec := doReqWithAK(http.MethodGet, "/api/v1/access-keys", nil, adminHdr, nil)
+		if akListRec.Code != http.StatusOK {
+			t.Fatalf("GET /api/v1/access-keys 失败: %d", akListRec.Code)
+		}
+		var akListResp struct {
+			AccessKeys []store.AccessKey `json:"accessKeys"`
+		}
+		_ = json.NewDecoder(akListRec.Body).Decode(&akListResp)
+		for _, item := range akListResp.AccessKeys {
+			if item.SecretKey != "" {
+				t.Fatalf("GET /api/v1/access-keys 列表中的 SecretKey 应当被脱敏置空，实际返回了 %q", item.SecretKey)
+			}
+		}
+
+		revealRec := doReqWithAK(http.MethodPost, "/api/v1/access-keys/"+ak.AccessKey+"/reveal", nil, adminHdr, nil)
+		if revealRec.Code != http.StatusOK {
+			t.Fatalf("POST /api/v1/access-keys/%s/reveal 失败: %d %s", ak.AccessKey, revealRec.Code, revealRec.Body.String())
+		}
+		var revealResp struct {
+			AccessKey string `json:"accessKey"`
+			SecretKey string `json:"secretKey"`
+		}
+		_ = json.NewDecoder(revealRec.Body).Decode(&revealResp)
+		if revealResp.SecretKey != ak.SecretKey {
+			t.Fatalf("reveal 返回的 SecretKey 不匹配: got=%q want=%q", revealResp.SecretKey, ak.SecretKey)
+		}
 	})
 }

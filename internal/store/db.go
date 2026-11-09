@@ -224,6 +224,9 @@ func (s *Store) BackupToDir(destDir string) (dbSnapshotPath string, copiedBlobs 
 			continue
 		}
 		if err := copyFileAtomic(srcPath, dstPath); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
 			return dbSnapshotPath, copiedBlobs, fmt.Errorf("复制物理块 %s 失败: %w", sha, err)
 		}
 		copiedBlobs++
@@ -257,7 +260,7 @@ func copyFileAtomic(src, dst string) error {
 }
 
 func (s *Store) backgroundMaintenanceLoop(skipStartupGC bool) {
-	multipartTTL := 2 * time.Hour
+	multipartTTL := 24 * time.Hour
 	if envTTL := strings.TrimSpace(os.Getenv("NANOCOS_MULTIPART_TTL")); envTTL != "" {
 		if d, err := time.ParseDuration(envTTL); err == nil && d > 0 {
 			multipartTTL = d
@@ -546,7 +549,15 @@ func (s *Store) CleanExpiredUploadsAndTokens(multipartTTL time.Duration) error {
 	var expiredIDs []string
 	if multipartTTL > 0 {
 		cutoff := now.Add(-multipartTTL)
-		rows, err := s.db.Query(`SELECT upload_id FROM multipart_uploads WHERE created_at < ?`, cutoff)
+		rows, err := s.db.Query(`
+			SELECT mu.upload_id
+			FROM multipart_uploads mu
+			WHERE mu.created_at < ?
+			  AND NOT EXISTS (
+			    SELECT 1 FROM multipart_parts mp
+			    WHERE mp.upload_id = mu.upload_id AND mp.uploaded_at >= ?
+			  )
+		`, cutoff, cutoff)
 		if err == nil {
 			for rows.Next() {
 				var id string
@@ -576,6 +587,7 @@ func (s *Store) ReconcileAndGC(multipartTTL time.Duration) error {
 
 	_ = s.CleanExpiredUploadsAndTokens(multipartTTL)
 
+	scanStart := time.Now()
 	s.writeMu.Lock()
 	if s.closed {
 		s.writeMu.Unlock()
@@ -611,7 +623,7 @@ func (s *Store) ReconcileAndGC(multipartTTL time.Duration) error {
 		_ = s.cas.DeleteBlob(sha)
 	}
 
-	// 3. 一次性加载所有有效 blobs 与活跃 upload_id 到内存集合，避免 WalkDir 期间逐文件查库
+	// 3. 一次性加载所有有效 blobs 与活跃 upload_id 到内存集合，随后立即释放写锁，避免 WalkDir 期间阻塞业务写入
 	validBlobs := make(map[string]struct{})
 	if rows, err := s.db.Query(`SELECT sha256 FROM blobs WHERE ref_count > 0`); err == nil {
 		for rows.Next() {
@@ -633,8 +645,9 @@ func (s *Store) ReconcileAndGC(multipartTTL time.Duration) error {
 		}
 		_ = rows.Close()
 	}
+	s.writeMu.Unlock()
 
-	// 4. 清理磁盘上不在 multipart_uploads 表中的孤儿分片目录
+	// 4. 在锁外清理磁盘上不在 multipart_uploads 表中的孤儿分片目录（排除对账快照点之后新建的目录）
 	if entries, err := os.ReadDir(s.cas.multipartDir); err == nil {
 		for _, entry := range entries {
 			if !entry.IsDir() {
@@ -642,12 +655,14 @@ func (s *Store) ReconcileAndGC(multipartTTL time.Duration) error {
 			}
 			uploadID := entry.Name()
 			if _, ok := activeUploads[uploadID]; !ok {
-				_ = s.cas.CleanupMultipart(uploadID)
+				if info, iErr := entry.Info(); iErr == nil && !info.ModTime().After(scanStart) {
+					_ = s.cas.CleanupMultipart(uploadID)
+				}
 			}
 		}
 	}
 
-	// 5. 扫描磁盘 blobs 目录，用内存 map O(1) 比对回收孤儿物理块文件
+	// 5. 在锁外扫描磁盘 blobs 目录，用内存 map O(1) 比对回收孤儿物理块文件（排除对账快照点之后新落盘的块）
 	_ = filepath.WalkDir(s.cas.blobsDir, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil || d.IsDir() {
 			return nil
@@ -657,11 +672,12 @@ func (s *Store) ReconcileAndGC(multipartTTL time.Duration) error {
 			return nil
 		}
 		if _, ok := validBlobs[sha]; !ok {
-			_ = os.Remove(path)
+			if info, iErr := d.Info(); iErr == nil && !info.ModTime().After(scanStart) {
+				_ = os.Remove(path)
+			}
 		}
 		return nil
 	})
-	s.writeMu.Unlock()
 
 	return nil
 }

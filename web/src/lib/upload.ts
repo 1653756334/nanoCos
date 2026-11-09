@@ -9,6 +9,9 @@ import {
   saveMultipartResumeRecord,
 } from './utils';
 
+/** 小于该阈值的文件跳过前置 Worker SHA-256 秒传探测，直接走单流 PUT（服务端边收边算 SHA-256 去重） */
+export const FAST_UPLOAD_THRESHOLD = 1 * 1024 * 1024;
+
 /** 小于该阈值的文件走单流 PUT，否则走分片上传 */
 export const MULTIPART_THRESHOLD = 5 * 1024 * 1024;
 
@@ -39,42 +42,44 @@ export async function uploadFile(
   report: (patch: UploadTaskPatch) => void,
   signal?: AbortSignal
 ): Promise<void> {
-  // 1. Web Worker 分片流式哈希计算与 CAS 秒传探测
-  report({ status: 'hashing', progress: 0, detail: '计算文件指纹 0% (Worker 分片流)...' });
-  try {
-    const sha256 = await computeFileSHA256Progressive(
-      file,
-      (pct) => {
-        report({
-          status: 'hashing',
-          progress: pct,
-          detail: `计算文件指纹 ${pct}% (Worker 分片流)...`,
-        });
-      },
-      signal
-    );
+  // 1. 仅对 >= 1MB 的文件启用 Web Worker 分片流式哈希计算与 CAS 秒传探测；小文件直接单流直传，省去 Worker 启动与额外 RTT
+  if (file.size >= FAST_UPLOAD_THRESHOLD) {
+    report({ status: 'hashing', progress: 0, detail: '计算文件指纹 0% (Worker 分片流)...' });
+    try {
+      const sha256 = await computeFileSHA256Progressive(
+        file,
+        (pct) => {
+          report({
+            status: 'hashing',
+            progress: pct,
+            detail: `计算文件指纹 ${pct}% (Worker 分片流)...`,
+          });
+        },
+        signal
+      );
 
-    if (sha256) {
-      report({ status: 'hashing', progress: 100, detail: '探测 CAS 秒传池...' });
-      const fastRes = await cosApi.tryFastUpload(bucket, {
-        key,
-        sha256,
-        contentType: file.type || 'application/octet-stream',
-      });
-      if (fastRes.fastUploaded) {
-        report({
-          status: 'fast',
-          progress: 100,
-          detail: 'SHA-256 极速秒传命中 (CAS 全局去重)',
+      if (sha256) {
+        report({ status: 'hashing', progress: 100, detail: '探测 CAS 秒传池...' });
+        const fastRes = await cosApi.tryFastUpload(bucket, {
+          key,
+          sha256,
+          contentType: file.type || 'application/octet-stream',
         });
-        return;
+        if (fastRes.fastUploaded) {
+          report({
+            status: 'fast',
+            progress: 100,
+            detail: 'SHA-256 极速秒传命中 (CAS 全局去重)',
+          });
+          return;
+        }
       }
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        throw err;
+      }
+      // 其他非中断异常则继续降级执行常规上传
     }
-  } catch (err: unknown) {
-    if (err instanceof DOMException && err.name === 'AbortError') {
-      throw err;
-    }
-    // 其他非中断异常则继续降级执行常规上传
   }
 
   report({ status: 'uploading', detail: '正在上传...' });
@@ -284,9 +289,12 @@ export async function uploadMultipart(
     await cosApi.completeMultipart(bucket, uploadId);
     await deleteMultipartResumeRecord(resumeKey);
   } catch (err) {
-    // 分片重试耗尽后主动清理服务端暂存分片与本地续传记录，防止残留孤儿分片占满配额
-    await cosApi.abortMultipart(bucket, uploadId).catch(() => {});
-    await deleteMultipartResumeRecord(resumeKey);
+    // 仅在用户主动取消任务时才销毁服务端暂存分片与本地断点续传记录；
+    // 网络波动或超时中断时保留服务端已传分片与 IndexedDB 记录，支持一键「重试 / 断点续传」
+    if (signal?.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
+      await cosApi.abortMultipart(bucket, uploadId).catch(() => {});
+      await deleteMultipartResumeRecord(resumeKey);
+    }
     throw err;
   }
 }

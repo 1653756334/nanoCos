@@ -13,6 +13,7 @@ import {
 import { StorageObject } from '../../../lib/api';
 import { formatBytes, formatDate } from '../../../lib/utils';
 import { PAGE_SIZE_OPTIONS, showTotalText } from '../constants';
+import type { SortDirection, SortField } from '../hooks/useObjectBrowser';
 import { FileTypeIcon } from './FileTypeIcon';
 
 interface ObjectTableProps {
@@ -24,8 +25,11 @@ interface ObjectTableProps {
   page: number;
   pageSize: number;
   totalCount: number;
+  sortBy?: SortField;
+  sortOrder?: SortDirection;
   onSelectKeysChange: (keys: Key[]) => void;
   onPageChange: (page: number, pageSize: number) => void;
+  onSortChange?: (field: SortField, order: SortDirection) => void;
   onEnterFolder: (key: string) => void;
   onOpenInspector: (obj: StorageObject) => void;
   onCopyLink: (obj: StorageObject) => void;
@@ -44,8 +48,11 @@ export function ObjectTable({
   page,
   pageSize,
   totalCount,
+  sortBy = 'key',
+  sortOrder = 'asc',
   onSelectKeysChange,
   onPageChange,
+  onSortChange,
   onEnterFolder,
   onOpenInspector,
   onCopyLink,
@@ -58,7 +65,9 @@ export function ObjectTable({
     {
       title: '文件名 (Key)',
       dataIndex: 'name',
-      key: 'name',
+      key: 'key',
+      sorter: true,
+      sortOrder: sortBy === 'key' ? (sortOrder === 'desc' ? 'descend' : 'ascend') : null,
       render: (_: unknown, record: StorageObject) => (
         <button
           onClick={() => {
@@ -78,9 +87,10 @@ export function ObjectTable({
     {
       title: '大小',
       dataIndex: 'sizeBytes',
-      key: 'sizeBytes',
+      key: 'size',
       width: 120,
-      sorter: (a, b) => a.sizeBytes - b.sizeBytes,
+      sorter: true,
+      sortOrder: sortBy === 'size' ? (sortOrder === 'desc' ? 'descend' : 'ascend') : null,
       render: (size: number, record: StorageObject) => (
         <span className="font-mono text-xs text-slate-600">
           {record.isFolder ? '-' : formatBytes(size)}
@@ -112,7 +122,8 @@ export function ObjectTable({
       dataIndex: 'updatedAt',
       key: 'updatedAt',
       width: 170,
-      sorter: (a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime(),
+      sorter: true,
+      sortOrder: sortBy === 'updatedAt' ? (sortOrder === 'desc' ? 'descend' : 'ascend') : null,
       render: (iso: string) => (
         <span className="font-mono text-xs text-slate-500">{formatDate(iso)}</span>
       ),
@@ -125,7 +136,7 @@ export function ObjectTable({
       render: (_: unknown, record: StorageObject) => {
         if (record.isFolder) {
           return (
-            <Space size={4}>
+            <Space size={2}>
               <Button
                 type="link"
                 size="small"
@@ -133,6 +144,15 @@ export function ObjectTable({
               >
                 进入目录
               </Button>
+              <Tooltip title="重命名 / 移动目录">
+                <Button
+                  type="text"
+                  size="small"
+                  aria-label={`重命名目录 ${record.name}`}
+                  icon={<EditOutlined />}
+                  onClick={() => onOpenRename(record)}
+                />
+              </Tooltip>
               <Popconfirm
                 title={`确定删除目录 "${record.name}" 及其所有子文件？`}
                 okText="确认删除"
@@ -236,6 +256,15 @@ export function ObjectTable({
       rowSelection={{
         selectedRowKeys: selectedKeys,
         onChange: (keys) => onSelectKeysChange(keys),
+      }}
+      onChange={(_pagination, _filters, sorter) => {
+        if (!onSortChange || Array.isArray(sorter)) return;
+        const field = (sorter.columnKey as SortField) || 'key';
+        if (!sorter.order) {
+          onSortChange('key', 'asc');
+        } else {
+          onSortChange(field, sorter.order === 'descend' ? 'desc' : 'asc');
+        }
       }}
       pagination={{
         current: page,

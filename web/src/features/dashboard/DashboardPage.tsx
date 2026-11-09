@@ -17,7 +17,7 @@ import { sortBucketsBySize, summarizeDashboard } from './metrics';
 /** 存储监控与分析大盘（路由页面入口，仅负责数据获取与区块组合） */
 export function DashboardPage() {
   const { stats, buckets, baseUrl, s3Endpoint, loading, refresh } = useSystemOverview();
-  const { openBucket, openKeys } = useDashboardNavigation();
+  const { openBucket, openObject, openKeys } = useDashboardNavigation();
   const bucketForm = useBucketForm();
   const deleteBucket = useDeleteBucketAction();
   const { bucketSearch, setBucketSearch, visFilter, setVisFilter, filteredBuckets } =
@@ -70,7 +70,7 @@ export function DashboardPage() {
           onEdit={bucketForm.openEditModal}
           onDelete={deleteBucket}
         />
-        <ObjectFeedPanel stats={stats} onOpenBucket={openBucket} />
+        <ObjectFeedPanel stats={stats} onOpenBucket={openBucket} onOpenObject={openObject} />
       </div>
 
       <BucketFormModal

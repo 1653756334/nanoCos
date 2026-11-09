@@ -16,4 +16,12 @@ export const routes = {
   buckets: '/buckets',
   bucket: (name: string, tab: ExplorerTab = 'objects') =>
     `/buckets/${encodeURIComponent(name)}${tab === 'objects' ? '' : `?tab=${tab}`}`,
+  bucketObject: (bucket: string, key: string) => {
+    const idx = key.lastIndexOf('/');
+    const prefix = idx >= 0 ? key.slice(0, idx + 1) : '';
+    const q = new URLSearchParams();
+    if (prefix) q.set('prefix', prefix);
+    q.set('inspect', key);
+    return `/buckets/${encodeURIComponent(bucket)}?${q.toString()}`;
+  },
 } as const;

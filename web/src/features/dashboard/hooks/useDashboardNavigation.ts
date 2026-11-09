@@ -10,7 +10,11 @@ export function useDashboardNavigation() {
     (bucketName: string, tab: ExplorerTab = 'objects') => navigate(routes.bucket(bucketName, tab)),
     [navigate]
   );
+  const openObject = useCallback(
+    (bucketName: string, key: string) => navigate(routes.bucketObject(bucketName, key)),
+    [navigate]
+  );
   const openKeys = useCallback(() => navigate(routes.keys), [navigate]);
 
-  return { openBucket, openKeys };
+  return { openBucket, openObject, openKeys };
 }

@@ -673,19 +673,79 @@ func verifyS3SigV2Header(r *http.Request, secretKey, providedSig string) bool {
 		return false
 	}
 
-	stringToSign := buildS3V2StringToSign(r, dateStr)
-	expectedSig := hmacSHA1Base64(secretKey, stringToSign)
-	return hmac.Equal([]byte(providedSig), []byte(expectedSig))
+	for _, cand := range buildS3V2StringToSignCandidates(r, dateStr) {
+		expectedSig := hmacSHA1Base64(secretKey, cand)
+		if hmac.Equal([]byte(providedSig), []byte(expectedSig)) {
+			return true
+		}
+	}
+	return false
 }
 
 // verifyS3SigV2Query 严格校验 AWS S3 Signature V2 Query Presigned URL (HMAC-SHA1)
 func verifyS3SigV2Query(r *http.Request, secretKey, expiresStr, providedSig string) bool {
-	stringToSign := buildS3V2StringToSign(r, expiresStr)
-	expectedSig := hmacSHA1Base64(secretKey, stringToSign)
-	return hmac.Equal([]byte(providedSig), []byte(expectedSig))
+	for _, cand := range buildS3V2StringToSignCandidates(r, expiresStr) {
+		expectedSig := hmacSHA1Base64(secretKey, cand)
+		if hmac.Equal([]byte(providedSig), []byte(expectedSig)) {
+			return true
+		}
+	}
+	return false
 }
 
-func buildS3V2StringToSign(r *http.Request, dateOrExpires string) string {
+var s3V2SubResources = map[string]bool{
+	"acl":                          true,
+	"delete":                       true,
+	"lifecycle":                    true,
+	"location":                     true,
+	"logging":                      true,
+	"notification":                 true,
+	"partNumber":                   true,
+	"policy":                       true,
+	"requestPayment":               true,
+	"torrent":                      true,
+	"uploadId":                     true,
+	"uploads":                      true,
+	"versionId":                    true,
+	"versioning":                   true,
+	"versions":                     true,
+	"website":                      true,
+	"response-cache-control":       true,
+	"response-content-disposition": true,
+	"response-content-encoding":    true,
+	"response-content-language":    true,
+	"response-content-type":        true,
+	"response-expires":             true,
+}
+
+func buildS3V2SubResourceQuery(r *http.Request) string {
+	if r.URL.RawQuery == "" {
+		return ""
+	}
+	q := r.URL.Query()
+	var keys []string
+	for k := range q {
+		if s3V2SubResources[k] {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 {
+		return ""
+	}
+	sort.Strings(keys)
+	var parts []string
+	for _, k := range keys {
+		vals := q[k]
+		if len(vals) == 0 || vals[0] == "" {
+			parts = append(parts, k)
+		} else {
+			parts = append(parts, k+"="+vals[0])
+		}
+	}
+	return "?" + strings.Join(parts, "&")
+}
+
+func buildS3V2StringToSignCandidates(r *http.Request, dateOrExpires string) []string {
 	contentMD5 := strings.TrimSpace(r.Header.Get("Content-MD5"))
 	contentType := strings.TrimSpace(r.Header.Get("Content-Type"))
 
@@ -712,12 +772,36 @@ func buildS3V2StringToSign(r *http.Request, dateOrExpires string) string {
 		amzSection.WriteString("\n")
 	}
 
-	// CanonicalizedResource (若路径带 /s3 前缀，同时支持标准路径)
-	resource := r.URL.Path
-	if resource == "" {
-		resource = "/"
+	basePath := r.URL.Path
+	if basePath == "" {
+		basePath = "/"
 	}
-	return fmt.Sprintf("%s\n%s\n%s\n%s\n%s%s", r.Method, contentMD5, contentType, dateOrExpires, amzSection.String(), resource)
+	subQuery := buildS3V2SubResourceQuery(r)
+	prefix := fmt.Sprintf("%s\n%s\n%s\n%s\n%s", r.Method, contentMD5, contentType, dateOrExpires, amzSection.String())
+
+	candidates := []string{
+		prefix + basePath + subQuery,
+	}
+	if subQuery != "" {
+		candidates = append(candidates, prefix+basePath)
+	}
+
+	// 兼容 Virtual-Host 风格 (<bucket>.host) 下客户端将 /<bucket> 写入 CanonicalizedResource 的标准行为
+	host := strings.ToLower(strings.TrimSpace(r.Host))
+	if idx := strings.IndexByte(host, ':'); idx >= 0 {
+		host = host[:idx]
+	}
+	if dot := strings.IndexByte(host, '.'); dot > 0 {
+		vhBucket := host[:dot]
+		if !strings.HasPrefix(basePath, "/"+vhBucket+"/") && basePath != "/"+vhBucket {
+			vhResource := "/" + vhBucket + basePath
+			candidates = append(candidates, prefix+vhResource+subQuery)
+			if subQuery != "" {
+				candidates = append(candidates, prefix+vhResource)
+			}
+		}
+	}
+	return candidates
 }
 
 func parseS3Date(s string) (time.Time, bool) {

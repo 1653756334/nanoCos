@@ -13,7 +13,7 @@ export function useCreateKeyModal() {
   const openModal = useCallback(() => {
     form.setFieldsValue({
       name: '',
-      allowedBuckets: '*',
+      allowedBuckets: ['*'],
       permission: 'readwrite',
     });
     setOpen(true);
@@ -24,9 +24,16 @@ export function useCreateKeyModal() {
   const submit = useCallback(async () => {
     try {
       const values = await form.validateFields();
+      const rawBuckets = values.allowedBuckets;
+      const allowedBuckets = Array.isArray(rawBuckets)
+        ? rawBuckets.includes('*') || rawBuckets.length === 0
+          ? '*'
+          : rawBuckets.map((b) => b.trim()).filter(Boolean).join(',')
+        : (rawBuckets || '*').trim();
+
       await createMutation.mutateAsync({
         name: values.name.trim(),
-        allowedBuckets: (values.allowedBuckets || '*').trim(),
+        allowedBuckets,
         permission: values.permission,
       });
       message.success('新访问密钥 (AK/SK) 已签发');

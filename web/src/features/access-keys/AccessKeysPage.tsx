@@ -15,11 +15,26 @@ export function AccessKeysPage() {
   const buckets = bucketsData ?? [];
   const { baseUrl, s3Endpoint, s3Region } = useSystemInfo();
 
-  const { keys, loading, revealedSK, toggleReveal, deleteKey } = useAccessKeyList();
+  const {
+    keys,
+    loading,
+    revealedSK,
+    secretMap,
+    revealingMap,
+    toggleReveal,
+    copySecret,
+    deleteKey,
+  } = useAccessKeyList();
   const createModal = useCreateKeyModal();
 
-  // 接入示例默认取第一把密钥与第一个存储桶
-  const sample = resolveSample(keys[0], buckets[0]?.name);
+  // 接入示例默认取第一把密钥与第一个存储桶（若已按需查看明文 SK 则自动带入）
+  const firstKey = keys[0]
+    ? {
+        accessKey: keys[0].accessKey,
+        secretKey: secretMap[keys[0].accessKey] || keys[0].secretKey,
+      }
+    : undefined;
+  const sample = resolveSample(firstKey, buckets[0]?.name);
 
   return (
     <div className="space-y-4">
@@ -29,7 +44,10 @@ export function AccessKeysPage() {
         keys={keys}
         loading={loading}
         revealedSK={revealedSK}
+        secretMap={secretMap}
+        revealingMap={revealingMap}
         onToggleReveal={toggleReveal}
+        onCopySecret={copySecret}
         onDelete={deleteKey}
       />
 
@@ -46,6 +64,7 @@ export function AccessKeysPage() {
         open={createModal.open}
         submitting={createModal.submitting}
         form={createModal.form}
+        buckets={buckets}
         onCancel={createModal.closeModal}
         onSubmit={createModal.submit}
       />

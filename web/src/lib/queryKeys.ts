@@ -10,7 +10,14 @@ export const queryKeys = {
   objectsOf: (bucket: string) => ['objects', bucket] as const,
   objects: (
     bucket: string,
-    params: { prefix: string; search: string; page: number; pageSize: number }
+    params: {
+      prefix: string;
+      search: string;
+      page: number;
+      pageSize: number;
+      sortBy?: string;
+      sortOrder?: string;
+    }
   ) => ['objects', bucket, params] as const,
   accessKeys: ['access-keys'] as const,
 };

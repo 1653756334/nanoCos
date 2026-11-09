@@ -77,6 +77,7 @@ export interface AuthMeResponse {
   authenticated: boolean;
   isAdmin: boolean;
   username: string;
+  version?: string;
   baseUrl: string;
   s3Endpoint: string;
   s3Region: string;
@@ -165,6 +166,7 @@ export const cosApi = {
   getStats: () =>
     request<{
       stats: SystemStats;
+      version?: string;
       baseUrl: string;
       s3Endpoint: string;
       s3Region: string;
@@ -203,13 +205,17 @@ export const cosApi = {
     prefix = '',
     search = '',
     limit = 50,
-    offset = 0
+    offset = 0,
+    sortBy = 'key',
+    sortOrder = 'asc'
   ) => {
     const q = new URLSearchParams({
       prefix,
       search,
       limit: String(limit),
       offset: String(offset),
+      sortBy,
+      sortOrder,
     });
     return request<DirectoryListing>(
       `/api/v1/buckets/${encodeURIComponent(bucket)}/objects?${q.toString()}`
@@ -342,8 +348,36 @@ export const cosApi = {
       body: JSON.stringify(payload),
     }),
 
+  revealAccessKey: (ak: string) =>
+    request<{ accessKey: string; secretKey: string }>(
+      `/api/v1/access-keys/${encodeURIComponent(ak)}/reveal`,
+      { method: 'POST' }
+    ),
+
   deleteAccessKey: (ak: string) =>
     request<{ ok: boolean }>(`/api/v1/access-keys/${encodeURIComponent(ak)}`, {
       method: 'DELETE',
+    }),
+
+  adminGC: () =>
+    request<{ ok: boolean }>('/api/v1/admin/gc', {
+      method: 'POST',
+    }),
+
+  adminScrub: () =>
+    request<{ checked: number; corrupted: string[]; healthy: boolean }>(
+      '/api/v1/admin/scrub',
+      { method: 'POST' }
+    ),
+
+  adminBackup: (targetDir?: string) =>
+    request<{
+      ok: boolean;
+      backupDir: string;
+      dbSnapshot: string;
+      copiedBlobs: number;
+    }>('/api/v1/admin/backup', {
+      method: 'POST',
+      body: JSON.stringify(targetDir ? { targetDir } : {}),
     }),
 };

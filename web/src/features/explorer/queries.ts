@@ -11,6 +11,8 @@ export interface ObjectListParams {
   search: string;
   page: number;
   pageSize: number;
+  sortBy?: string;
+  sortOrder?: string;
 }
 
 export interface ObjectListResult {
@@ -36,7 +38,9 @@ export function useObjectList(bucket: string, params: ObjectListParams): ObjectL
         params.prefix,
         params.search,
         params.pageSize,
-        (params.page - 1) * params.pageSize
+        (params.page - 1) * params.pageSize,
+        params.sortBy || 'key',
+        params.sortOrder || 'asc'
       ),
     enabled: !!bucket,
     placeholderData: keepPreviousData,

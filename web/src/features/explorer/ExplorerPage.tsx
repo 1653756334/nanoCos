@@ -25,7 +25,7 @@ import { useDeleteObjects, useObjectList } from './queries';
 export function ExplorerPage() {
   const navigate = useNavigate();
   const { bucket: bucketParam } = useParams<{ bucket?: string }>();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const activeTab: ExplorerTab = parseExplorerTab(searchParams.get('tab'));
 
   const { data: buckets = [] } = useBuckets();
@@ -57,6 +57,8 @@ export function ExplorerPage() {
     search: browser.search,
     page: browser.page,
     pageSize: browser.pageSize,
+    sortBy: browser.sortBy,
+    sortOrder: browser.sortOrder,
   });
 
   // 当服务端数据刷新（dataUpdatedAt 改变）时，清空多选
@@ -70,6 +72,24 @@ export function ExplorerPage() {
     baseUrl,
     visibility: currentBucket?.visibility,
   });
+
+  // 支持从仪表盘点击 Top 大文件 / 最新上传携带 ?inspect=<key> 直接打开对应对象的详情抽屉
+  const inspectKey = searchParams.get('inspect');
+  useEffect(() => {
+    if (!inspectKey || objectList.items.length === 0) return;
+    const found = objectList.items.find((item) => item.key === inspectKey);
+    if (found) {
+      void inspector.open(found);
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete('inspect');
+          return next;
+        },
+        { replace: true }
+      );
+    }
+  }, [inspectKey, objectList.items, inspector, setSearchParams]);
 
   const { copyLink, download } = useObjectLinks({
     bucket: selectedBucketName,
@@ -91,8 +111,10 @@ export function ExplorerPage() {
     queue: uploadQueue,
     activeCount: uploadingCount,
     uploadFiles,
+    uploadDataTransfer,
     clear: clearUploadQueue,
     cancelTask,
+    retryTask,
     cancelAll: cancelAllUploads,
   } = useUploadQueue({
     bucket: selectedBucketName,
@@ -151,9 +173,9 @@ export function ExplorerPage() {
       onDrop={(e) => {
         e.preventDefault();
         setPageDragOver(false);
-        if (e.dataTransfer.files?.length) {
+        if (e.dataTransfer.files?.length || e.dataTransfer.items?.length) {
           setUploadModalOpen(true);
-          void uploadFiles(e.dataTransfer.files);
+          void uploadDataTransfer(e.dataTransfer);
         }
       }}
     >
@@ -210,8 +232,11 @@ export function ExplorerPage() {
               page={browser.page}
               pageSize={browser.pageSize}
               totalCount={objectList.totalCount}
+              sortBy={browser.sortBy}
+              sortOrder={browser.sortOrder}
               onSelectKeysChange={browser.setSelectedKeys}
               onPageChange={browser.changePage}
+              onSortChange={browser.changeSort}
               onEnterFolder={browser.enterFolder}
               onOpenInspector={inspector.open}
               onCopyLink={copyLink}
@@ -229,12 +254,20 @@ export function ExplorerPage() {
               bucketName={selectedBucketName}
               baseUrl={baseUrl}
               isPublicBucket={isPublicBucket}
+              selectedKeys={browser.selectedKeys}
               page={browser.page}
               pageSize={browser.pageSize}
               totalCount={objectList.totalCount}
+              onSelectKeysChange={browser.setSelectedKeys}
               onPageChange={browser.changePage}
               onEnterFolder={browser.enterFolder}
               onOpenInspector={inspector.open}
+              onCopyLink={copyLink}
+              onOpenRename={(obj) => {
+                setRenameTarget(obj);
+                setRenameModalOpen(true);
+              }}
+              onDeleteSingle={handleDeleteSingle}
             />
           )}
         </Card>
@@ -278,9 +311,15 @@ export function ExplorerPage() {
         onClose={() => setUploadModalOpen(false)}
         onClearQueue={clearUploadQueue}
         onCancelTask={cancelTask}
+        onRetryTask={(id) => {
+          void retryTask(id);
+        }}
         onCancelAll={cancelAllUploads}
         onFilesSelect={(files) => {
           void uploadFiles(files);
+        }}
+        onDropDataTransfer={(dt) => {
+          void uploadDataTransfer(dt);
         }}
       />
 
